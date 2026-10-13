@@ -40,6 +40,14 @@ export function playButton(text, label = "Hear the brief") {
 
 // ── Images: short-lived signed links from the private bucket ──
 const urlCache = new Map();
+// Many images at once (the brand board has hundreds): one request per hundred instead of one each.
+export async function prefetchUrls(paths) {
+  const todo = [...new Set(paths.filter(p => p && !urlCache.has(p)))];
+  for (let i = 0; i < todo.length; i += 100) {
+    const { data } = await sb.storage.from("board-concepts").createSignedUrls(todo.slice(i, i + 100), 3600);
+    for (const r of data || []) if (r.signedUrl && r.path) urlCache.set(r.path, r.signedUrl);
+  }
+}
 export async function imageUrl(path) {
   if (urlCache.has(path)) return urlCache.get(path);
   const { data, error } = await sb.storage.from("board-concepts").createSignedUrl(path, 3600);
@@ -165,7 +173,7 @@ export function trimmedUrl(path) {
     const url = await imageUrl(path);
     try {
       const bmp = await createImageBitmap(await (await fetch(url)).blob());
-      const k = Math.min(1, 1400 / Math.max(bmp.width, bmp.height));
+      const k = Math.min(1, 900 / Math.max(bmp.width, bmp.height));
       let cur = document.createElement("canvas"); cur.width = Math.max(1, Math.round(bmp.width * k)); cur.height = Math.max(1, Math.round(bmp.height * k));
       cur.getContext("2d").drawImage(bmp, 0, 0, cur.width, cur.height);
       let changed = false;

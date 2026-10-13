@@ -65,7 +65,7 @@ export async function take({ question, concept, src, kept = 0, total = 0 }) {
     content.push({ type: "text", text: `#${concept.candidate_no}${concept.label ? ` (Rick's label: ${concept.label})` : ""}, large:` }, img(canvasPng(fit(bmp, 512))),
       { type: "text", text: "The same mark at 24px (shown 4x, hard pixels):" }, img(canvasPng(at24(bmp))));
   }
-  content.push({ type: "text", text: `${kept} kept so far of ${total}.${concept?.notes ? ` Rick's note on it: "${concept.notes}".` : ""}\nRick asks: ${question || "What's your honest take on this one?"}\n` +
+  content.push({ type: "text", text: `${kept} kept so far of ${total}.${concept?.notes ? ` Rick's note on it: "${concept.notes}".` : ""}${concept?.comments ? ` What Rick said about it when it was made (his words): "${String(concept.comments).slice(0, 700)}".` : ""}\nRick asks: ${question || "What's your honest take on this one?"}\n` +
     (concept ? `Reply with JSON only: {"take":"2 or 3 sentences, under 60 words: what works, what doesn't, and your call","verdicts":{"trust":"Strong|Holds|Shaky|Fails","record":"Strong|Holds|Shaky|Fails","human":"Strong|Holds|Shaky|Fails","at24":"Strong|Holds|Shaky|Fails"},"call":"keep|archive|unsure"}` : `Answer in 2 or 3 sentences, under 60 words, plain text.`) });
   const text = await ask({ system: VOICE, content, maxTokens: 700, json: Boolean(concept) });
   if (!concept) return { take: text };

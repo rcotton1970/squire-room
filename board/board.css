@@ -427,3 +427,18 @@ main { padding-bottom: 140px; }
   .concept-form { padding-bottom: 72px; }
 }
 @media (max-width: 640px) { .one-nav { margin-right: 64px; } }
+
+/* Brand board in the cull */
+.fam-head { grid-column: 1 / -1; font-size: 18px; padding-top: 16px; border-top: 1px solid var(--hair); display: flex; gap: 8px; align-items: baseline; }
+.grid-cull > .fam-head:first-child { padding-top: 0; border-top: 0; }
+.fam-pick { width: auto; min-width: 220px; max-width: 100%; font-size: 15px; }
+.rail-rest { position: absolute; right: 0; bottom: 0; font-size: 12px; color: var(--graphite); }
+.rail:has(.rail-rest) { min-width: 0; }
+.starmark { color: var(--ink); }
+.missing-note summary { cursor: pointer; font-size: 13px; color: var(--signal-deep); }
+.missing-note p { max-width: 80ch; font-size: 13px; }
+.brand-facts { display: grid; gap: 8px; }
+.brand-facts .record { padding: 12px 14px; }
+.brand-facts .record p:not(.sub) { font-size: 16px; }
+.noimg { display: grid; place-items: center; position: absolute; inset: 0; color: var(--signal-deep); font-size: 13px; background: repeating-linear-gradient(135deg, transparent 0 10px, rgb(200 55 6 / .05) 10px 20px); }
+.brand-facts button { justify-self: start; }

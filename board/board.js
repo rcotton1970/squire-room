@@ -16,7 +16,7 @@ async function start() {
   if (!session) return signInScreen();
   const me = session.user;
   let { data: board } = await sb.from("boards").select(BOARD_COLS).eq("slug", SLUG).maybeSingle();
-  if (board?.owners?.includes(me.id)) return board.kind === "brand" ? ownerBrand(board) : board.status === "draft" ? ownerCull(board, { cropper }) : ownerLive(board);
+  if (board?.owners?.includes(me.id)) return board.kind === "brand" ? (new URLSearchParams(location.search).get("view") === "shelves" ? ownerBrand(board) : ownerCull(board, { cropper, brand: true })) : board.status === "draft" ? ownerCull(board, { cropper }) : ownerLive(board);
   if (!board || INVITE) {
     if (!INVITE) return show(plainPage("This board needs your invite link", el("p", {}, "Open the link you were sent. Each reviewer has their own."), signedInAs(me)));
     const { error } = await sb.rpc("board_claim", { p_slug: SLUG, p_token: INVITE });
@@ -288,7 +288,7 @@ async function ownerBrand(board, ui = { tab: "featured", picked: new Set(), sent
 
   if (seq !== brandSeq) return;
   const tabBar = el("div", { class: "tabs", role: "tablist" }, SHELVES.map(([k, n]) => el("button", { type: "button", role: "tab", "aria-selected": String(ui.tab === k), onclick: () => again(k) }, `${n} (${cands.filter(c => shelfOf(c) === k).length})`)));
-  show(el("div", { class: "card" }, el("h1", {}, board.title), el("p", { class: "muted" }, "Private: only you see this board. Uncommented images sit in Archive, still visible. Nothing is ever deleted."),
+  show(el("div", { class: "card" }, el("h1", {}, board.title), el("p", { class: "muted" }, "Private: only you see this board. Uncommented images sit in Archive, still visible. Nothing is ever deleted. ", el("a", { href: `?b=${board.slug}` }, "Back to the cull")),
       missing.length ? el("div", { class: "flag-box" }, el("b", {}, `Image missing (${missing.length}): `), missing.flatMap((c, i) => [i ? ", " : "", el("a", { href: `#card-${c.ref || c.id}`, onclick: (e) => { e.preventDefault(); again(shelfOf(c)).then(() => document.getElementById(`card-${c.ref || c.id}`)?.scrollIntoView({ block: "center" })); } }, c.ref || `#${c.candidate_no}`)])) : null,
       el("div", { class: "row" }, el("label", { class: "button" }, "＋ Upload images", upload), el("span", { class: "small" }, "New images start on Reviewed."))),
     tabBar, tabBody, msg,

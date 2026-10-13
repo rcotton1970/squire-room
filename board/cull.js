@@ -1,7 +1,7 @@
 // The owner's board while it's a draft: fast cull first, then the Curator's
 // Note, then send to the team. Keep and archive are saved as you go; every
 // action (yours or Coach's) is logged and can be undone. Nothing is deleted.
-import { el, show, errBox, sb, rpc, imageUrl, trimmedUrl, uploadImage, when, armed, roundsList, caption, prefersReducedMotion } from "./core.js";
+import { el, show, errBox, sb, rpc, imageUrl, prefetchUrls, trimmedUrl, uploadImage, when, armed, roundsList, caption, prefersReducedMotion } from "./core.js";
 import { createDock } from "./dock.js";
 import { take, check24, curatorNote } from "./coach.js";
 
@@ -10,18 +10,22 @@ const isTyping = (t) => t && (t.closest("input, textarea, select, [contenteditab
 const phone = () => window.matchMedia("(max-width: 640px)").matches;
 const fmtTime = (t) => new Date(t).toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
 
-export async function ownerCull(board, { cropper } = {}) {
+// brand: the private brand board (hundreds of concepts in families, Rick's own
+// comments on each; it never goes live itself, its kept set is sent to a team board).
+export async function ownerCull(board, { cropper, brand = false } = {}) {
   const S = {
     cands: [], events: [], view: "cull", focus: null, selected: new Set(), takes: {}, recent: new Map(), loupe: false,
-    one: phone(), closed: false, toast: null, undoStack: [],
+    one: phone(), closed: false, toast: null, undoStack: [], family: "", base: 0,
   };
-  const imgs = new Map();           // one <img> per image path, reused across renders (no reload flicker)
+  // Images load as they come into view (a brand board has hundreds), trimmed to the mark.
+  const done = new Map();           // path → trimmed url, once known
+  const seen = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) { seen.unobserve(e.target); const p = e.target.dataset.path; trimmedUrl(p).then(u => { done.set(p, u); e.target.src = u; }).catch(() => {}); }
+  }, { rootMargin: "600px 0px" });
   const imgFor = (path, alt = "") => {
     if (!path) return el("div", { class: "noimg" }, "Image missing");
-    const key = path;
-    if (!imgs.has(key)) { const i = el("img", { alt, decoding: "async" }); trimmedUrl(path).then(u => { i.src = u; }).catch(() => {}); imgs.set(key, i); }
-    const i = imgs.get(key).cloneNode(); i.alt = alt;
-    if (!i.src) trimmedUrl(path).then(u => { i.src = u; }).catch(() => {});
+    const i = el("img", { alt, decoding: "async", "data-path": path });
+    if (done.has(path)) i.src = done.get(path); else seen.observe(i);
     return i;
   };
   const minis = (c) => el("span", { class: "minis", "aria-label": "At 24px, on paper and on ink" },
@@ -29,11 +33,19 @@ export async function ownerCull(board, { cropper } = {}) {
 
   async function load() {
     S.cands = await rpc("board_candidates", { p_board: board.id });
+    if (!S.base) { S.base = brand ? S.cands.filter(c => !c.archived_at).length : S.cands.length; prefetchUrls(S.cands.map(c => c.image_path)).catch(() => {}); }
     const { data } = await sb.from("board_events").select("id, at, actor, action, concepts, summary, undone_at").eq("board_id", board.id).order("at", { ascending: false }).limit(200);
     S.events = data || [];
     if (!S.focus || !S.cands.some(c => c.id === S.focus && !c.archived_at)) S.focus = (active().find(c => !c.kept) || active()[0])?.id || null;
   }
-  const active = () => S.cands.filter(c => !c.archived_at || S.recent.has(c.id)).sort((a, b) => a.sort_order - b.sort_order);
+  // Brand families run newest work first (the manifest is in the order things were made).
+  const famRank = () => { const r = {}; for (const c of S.cands) { const f = c.family || ""; r[f] = Math.max(r[f] ?? 0, c.candidate_no); } return r; };
+  // What's on screen: everything not archived, in the chosen family (brand board), in order.
+  const active = () => {
+    const rank = brand && !S.family ? famRank() : null;
+    return S.cands.filter(c => (!c.archived_at || S.recent.has(c.id)) && (!S.family || (c.family || "") === S.family))
+      .sort((a, b) => (rank ? (rank[b.family || ""] - rank[a.family || ""]) || String(a.family).localeCompare(String(b.family)) : 0) || a.sort_order - b.sort_order);
+  };
   const archived = () => S.cands.filter(c => c.archived_at);
   const keptList = () => S.cands.filter(c => c.kept && !c.archived_at).sort((a, b) => a.sort_order - b.sort_order);
   const byId = (id) => S.cands.find(c => c.id === id);
@@ -59,12 +71,13 @@ export async function ownerCull(board, { cropper } = {}) {
     if (advance && ids.length === 1 && ids[0] === S.focus) step(1, { skipDecided: true });
     S.selected.clear();
     render();
-    const saved = (S.chain = (S.chain || Promise.resolve()).catch(() => {}).then(() => rpc("board_cull", { p_board: board.id, p_action: action, p_concepts: ids, p_actor: actor, p_summary: text })));
+    // The undo entry is recorded the moment the save lands, so Z right after X always undoes the X.
+    const saved = (S.chain = (S.chain || Promise.resolve()).catch(() => {}).then(() => rpc("board_cull", { p_board: board.id, p_action: action, p_concepts: ids, p_actor: actor, p_summary: text }))
+      .then(ev => { if (ev) S.undoStack.push(ev); return ev; }));
     try {
       const ev = await saved;
       await load(); render();
       if (!ev) return toast("Already that way. Nothing changed.");
-      S.undoStack.push(ev);
       toast(text, ev);
     } catch (e) { await load(); render(); throw e; }
   }
@@ -92,22 +105,31 @@ export async function ownerCull(board, { cropper } = {}) {
     }
     S.focus = list[i].id;
   }
+  // Arrows move to the nearest tile in that direction on screen (rows can break at family headings).
   function moveGrid(dx, dy) {
-    const grid = document.querySelector(".grid-cull");
-    const list = active();
-    const i = list.findIndex(c => c.id === S.focus);
-    const cols = grid ? getComputedStyle(grid).gridTemplateColumns.split(" ").length : 1;
-    const j = Math.max(0, Math.min(list.length - 1, i + dx + dy * cols));
-    S.focus = list[j]?.id || S.focus;
+    const tiles = [...document.querySelectorAll(".grid-cull .tile")];
+    const cur = tiles.find(t => t.dataset.id === S.focus);
+    if (!cur) { S.focus = tiles[0]?.dataset.id || S.focus; return; }
+    if (dx) { const i = tiles.indexOf(cur) + dx; if (tiles[i]) S.focus = tiles[i].dataset.id; return; }
+    const r = cur.getBoundingClientRect(), cx = r.left + r.width / 2;
+    let best = null, bestD = Infinity;
+    for (const t of tiles) {
+      const q = t.getBoundingClientRect();
+      const ahead = dy > 0 ? q.top > r.top + 4 : q.top < r.top - 4;
+      if (!ahead) continue;
+      const d = Math.abs(q.top - r.top) * 4 + Math.abs(q.left + q.width / 2 - cx);
+      if (d < bestD) { bestD = d; best = t; }
+    }
+    if (best) S.focus = best.dataset.id;
   }
   const targets = () => (S.selected.size ? [...S.selected] : S.focus ? [S.focus] : []);
 
   // ── Render ──
   function render() {
-    const kept = keptList().length, total = S.cands.filter(c => !c.archived_at).length + 0, undecided = S.cands.filter(c => !c.archived_at && !c.kept).length;
-    const allCount = S.cands.length;
+    const kept = keptList().length, undecided = S.cands.filter(c => !c.archived_at && !c.kept).length;
+    const allCount = S.base || S.cands.length;
     const inAim = kept >= AIM_MIN && kept <= AIM_MAX;
-    const started = kept || archived().length;
+    const started = kept || S.events.some(e => !e.undone_at);
     const counter = el("div", { class: "counter" },
       el("span", { class: "num" }, String(started ? kept : allCount)),
       el("p", {}, !started ? `\u2192 aiming for ${AIM_MIN}\u2013${AIM_MAX}`
@@ -118,7 +140,9 @@ export async function ownerCull(board, { cropper } = {}) {
     const nav = el("nav", { class: "views", "aria-label": "Board" }, [["cull", "Cull"], ["note", "Note"], ["archive", `Archive (${archived().length})`], ["history", "History"]]
       .map(([k, n]) => el("button", { type: "button", "aria-current": S.view === k ? "page" : null, onclick: () => { S.view = k; S.loupe = false; render(); } }, n)));
     const header = el("header", { class: "top" },
-      el("div", { class: "title" }, el("h1", {}, board.title), el("p", { class: "sub" }, `Round ${board.round} draft. Only you can see this page.`)),
+      el("div", { class: "title" }, el("h1", {}, board.title),
+        el("p", { class: "sub" }, brand ? "Private. Only you can see this board. " : `Round ${board.round} draft. Only you can see this page.`, brand ? el("a", { href: `?b=${board.slug}&view=shelves` }, "Shelves view") : null),
+        brand ? missingNote() : null),
       nav, counter);
     const views = { cull: cullView, note: noteView, archive: archiveView, history: historyView };
     show(header, rail(), views[S.view](), S.view === "cull" ? keysLine() : null, selectionBar(), S.loupe ? loupe() : null);
@@ -131,11 +155,13 @@ export async function ownerCull(board, { cropper } = {}) {
   // The tally rail: every concept at true 24px. Kept rise, archived sink, a bracket marks 7 to 10.
   function rail() {
     const kept = keptList(), undecided = S.cands.filter(c => !c.archived_at && !c.kept).sort((a, b) => a.sort_order - b.sort_order), arch = archived();
-    const slots = [...kept.map(c => [c, "up"]), ...undecided.map(c => [c, ""]), ...arch.map(c => [c, "down"])];
+    // The brand board has hundreds: its rail shows what you've kept against the aim, and counts the rest.
+    const slots = brand ? kept.map(c => [c, "up"]) : [...kept.map(c => [c, "up"]), ...undecided.map(c => [c, ""]), ...arch.map(c => [c, "down"])];
     const r = el("div", { class: `rail${S.closed ? " closed" : ""}`, role: "img", "aria-label": `${kept.length} kept, ${undecided.length} undecided, ${arch.length} archived` },
       el("div", { class: "aim", style: `--from:${AIM_MIN - 1};--span:${AIM_MAX - AIM_MIN + 1}` }, el("span", {}, "aim")),
       el("div", { class: "slots" }, slots.map(([c, cls]) => el("button", { type: "button", tabindex: "-1", class: `slot ${cls}${c.id === S.focus ? " at" : ""}`, title: nameOf(c), onclick: () => { if (!c.archived_at) { S.focus = c.id; S.view = "cull"; S.focusScroll = true; render(); } } }, imgFor(c.image_path)))),
-      el("div", { class: "rule", style: `--kept:${kept.length}` }));
+      el("div", { class: "rule", style: `--kept:${kept.length}` }),
+      brand ? el("p", { class: "rail-rest" }, `${undecided.length} undecided, ${arch.length} archived`) : null);
     return el("div", { class: "rail-wrap" }, r);
   }
 
@@ -152,7 +178,7 @@ export async function ownerCull(board, { cropper } = {}) {
           el("button", { type: "button", onclick: (e) => { e.stopPropagation(); run(cull(c.kept ? "unkeep" : "keep", [c.id])); } }, c.kept ? "Clear" : "Keep"),
           el("button", { type: "button", onclick: (e) => { e.stopPropagation(); run(cull("archive", [c.id])); } }, "Archive"),
           el("button", { type: "button", onclick: (e) => { e.stopPropagation(); S.loupe = true; render(); } }, "Look closer")) : null),
-      el("figcaption", {}, el("span", { class: "cid" }, id), el("span", { class: "cname" }, name)),
+      el("figcaption", {}, el("span", { class: "cid" }, id, c.starred ? el("span", { class: "starmark", "aria-label": "starred" }, " \u2605") : null), el("span", { class: "cname" }, name)),
       c.kept ? el("p", { class: "kept-mark" }, "Kept") : null,
       gone ? el("p", { class: "gone-mark" }, "Archived. ", el("button", { type: "button", class: "link", onclick: (e) => { e.stopPropagation(); run(undo(S.events.find(x => !x.undone_at && x.action === "archive" && x.concepts.includes(c.id))?.id)); } }, "Undo")) : null);
     t.onclick = () => { if (gone) return; S.focus = c.id; render(); };
@@ -171,10 +197,31 @@ export async function ownerCull(board, { cropper } = {}) {
     const toggle = el("div", { class: "seg", role: "group", "aria-label": "Layout" },
       el("button", { type: "button", "aria-pressed": String(S.one), onclick: () => { S.one = true; render(); } }, "One"),
       el("button", { type: "button", "aria-pressed": String(!S.one), onclick: () => { S.one = false; render(); } }, "Grid"));
-    const tools = phone() ? el("div", { class: "cull-tools" }, toggle) : null;
-    if (S.one && phone()) return el("section", { class: "cull one" }, oneCard(toggle));
-    if (!list.length) return el("section", { class: "empty" }, el("p", {}, "Everything is archived. Restore some from Archive."), uploadButton());
-    return el("section", { class: "cull" }, tools, el("div", { class: "grid-cull" }, list.map(tile)), el("div", { class: "cull-foot" }, uploadButton()));
+    const fam = brand ? familyPicker() : null;
+    const tools = phone() || fam ? el("div", { class: "cull-tools" }, fam, phone() ? toggle : null) : null;
+    if (S.one && phone()) return el("section", { class: "cull one" }, fam, oneCard(toggle));
+    if (!list.length) return el("section", { class: "empty" }, fam, el("p", {}, S.family ? "Nothing left undecided in this family." : "Everything is archived. Restore some from Archive."), uploadButton());
+    const cells = [];
+    let last = null;
+    for (const c of list) {
+      if (brand && !S.family && (c.family || "") !== last) { last = c.family || ""; cells.push(el("h2", { class: "fam-head" }, last || "No family", el("span", { class: "sub" }, ` ${list.filter(x => (x.family || "") === last).length}`))); }
+      cells.push(tile(c));
+    }
+    return el("section", { class: "cull" }, tools, el("div", { class: "grid-cull" }, cells), el("div", { class: "cull-foot" }, uploadButton()));
+  }
+  function familyPicker() {
+    const rank = famRank();
+    const fams = [...new Set(S.cands.filter(c => !c.archived_at).map(c => c.family || ""))].sort((a, b) => rank[b] - rank[a]);
+    const sel = el("select", { "aria-label": "Family", class: "fam-pick" }, el("option", { value: "" }, `All families (${S.cands.filter(c => !c.archived_at).length})`),
+      fams.map(f => { const o = el("option", { value: f }, `${f || "No family"} (${S.cands.filter(c => !c.archived_at && (c.family || "") === f).length})`); if (f === S.family) o.selected = true; return o; }));
+    sel.onchange = () => { S.family = sel.value; S.focus = active().find(c => !c.kept)?.id || active()[0]?.id || null; render(); window.scrollTo(0, 0); };
+    return sel;
+  }
+  function missingNote() {
+    const miss = S.cands.filter(c => c.image_missing);
+    if (!miss.length) return null;
+    return el("details", { class: "missing-note" }, el("summary", {}, `${miss.length} have no image yet`),
+      el("p", { class: "sub" }, miss.map(c => c.ref || `#${c.candidate_no}`).join(", ")));
   }
 
   // Phone: one concept at a time; swipe right to keep, left to archive.
@@ -238,6 +285,11 @@ export async function ownerCull(board, { cropper } = {}) {
             sizes.map(px => el("tr", {}, el("td", {}, `${px}px`), el("td", {}, el("span", { class: "sz", style: `--px:${px}px` }, imgFor(c.image_path))), el("td", {}, el("span", { class: "sz ink", style: `--px:${px}px` }, imgFor(c.image_path)))))),
           el("h3", {}, "In a row of app icons"),
           el("div", { class: "homerow" }, el("span", { class: "ph" }), el("span", { class: "ph" }), el("span", { class: "app" }, imgFor(c.image_path)), el("span", { class: "ph" })),
+          brand ? el("div", { class: "brand-facts" },
+            c.description ? el("p", {}, c.description) : null,
+            el("p", { class: "sub" }, [c.family, c.shelf === "featured" ? "Featured" : null, c.source && /: /.test(c.source) ? c.source.replace(/^BRAND-MANIFEST\.md: /, "") : null].filter(Boolean).join(". ")),
+            c.comments ? el("div", { class: "record" }, el("p", { class: "sub" }, "Your comments"), el("p", {}, c.comments)) : el("p", { class: "sub" }, "No comments from you on this one."),
+            el("button", { type: "button", class: "small", onclick: () => run(rpc("board_curate", { p_concept: c.id, p_shelf: null, p_starred: !c.starred, p_family: null }).then(load).then(render)) }, c.starred ? "Unstar" : "Star")) : null,
           notes,
           el("div", { class: "row" }, el("label", { class: "button small" }, "Replace image", replace), cropper ? el("button", { type: "button", class: "small", onclick: () => cropper(board, c, async () => { await load(); S.loupe = true; render(); }) }, "Crop") : null))),
       el("div", { class: "loupe-foot" },
@@ -313,8 +365,9 @@ export async function ownerCull(board, { cropper } = {}) {
     area.oninput = checkNote; checkNote();
     approve.onclick = () => run(rpc("board_curator_note", { p_board: board.id, p_note: area.value, p_approve: true }).then(() => { board.curator_note = area.value; board.brief = area.value; board.note_approved_at = new Date().toISOString(); render(); }));
     const sendBox = board.note_approved_at && area.value === board.curator_note
-      ? el("div", { class: "send" }, el("p", {}, "Sending locks the set and this note. Reviewers see one concept at a time, with random letters."),
-          el("div", { class: "row" }, armed("Send to the team", "Tap again to send and lock", async () => { await rpc("board_go_live", { p_board: board.id }); location.reload(); }, "primary"), el("button", { type: "button", class: "link", onclick: () => { board.note_approved_at = null; render(); } }, "Keep editing")))
+      ? (brand ? brandSend(kept, area.value)
+        : el("div", { class: "send" }, el("p", {}, "Sending locks the set and this note. Reviewers see one concept at a time, with random letters."),
+          el("div", { class: "row" }, armed("Send to the team", "Tap again to send and lock", async () => { await rpc("board_go_live", { p_board: board.id }); location.reload(); }, "primary"), el("button", { type: "button", class: "link", onclick: () => { board.note_approved_at = null; render(); } }, "Keep editing"))))
       : null;
     return el("section", { class: "note" },
       el("div", { class: "note-head" }, el("h2", {}, "Curator\u2019s Note"), el("div", { class: "row" }, status, count), el("div", { class: "row" }, draft, save, sendBox ? null : approve)),
@@ -322,6 +375,28 @@ export async function ownerCull(board, { cropper } = {}) {
         el("div", { class: "kept-strip" }, kept.map(c => { const { id, name } = caption(c); return el("figure", {}, el("span", { class: "thumb" }, imgFor(c.image_path, id)), el("figcaption", {}, el("span", { class: "cid" }, id), " ", name)); }))),
       area, msg, sendBox,
       el("p", { class: "sub" }, "The approved note is what reviewers read first, in place of the old brief. ", el("button", { type: "button", class: "link", onclick: () => { S.closed = false; S.view = "cull"; render(); } }, "Reopen the cull")));
+  }
+
+  // Brand board: hand the kept set and the note to a team board's draft. Nothing goes live here;
+  // the team board letters them blind and locks only when Rick sends it to the team from there.
+  function brandSend(kept, note) {
+    const box = el("div", { class: "send" }, el("p", { class: "sub" }, "Finding your team board…"));
+    sb.from("boards").select("id, slug, title, status, round, owners, kind").eq("kind", "first-impressions").order("created_at").then(async ({ data }) => {
+      const me = (await sb.auth.getUser()).data.user;
+      const t = (data || []).filter(b => b.owners?.includes(me.id) && b.status === "draft").at(-1);
+      if (!t) return box.replaceChildren(el("p", {}, "Your team logo board is live, so its set is locked. Start a new round there, then send these."));
+      const there = await rpc("board_candidates", { p_board: t.id }).catch(() => []);
+      const others = there.filter(c => !c.archived_at && !kept.some(k => k.id === c.sent_from)).length;
+      box.replaceChildren(
+        el("p", {}, `Send these ${kept.length} and this note to ${t.title}${t.round > 1 ? ` (round ${t.round})` : ""}. They land in its draft; nothing goes to the team until you send it from there.`),
+        others ? el("p", { class: "sub" }, `${t.title} already holds ${others} other concepts in its draft. These are added alongside them; archive the old ones there if you want only these.`) : null,
+        el("div", { class: "row" }, armed(`Send ${kept.length} to ${t.title}`, "Tap again to send", async () => {
+          const slug = await rpc("board_send", { p_brand: board.id, p_target: t.id, p_concepts: kept.map(c => c.id) });
+          await rpc("board_curator_note", { p_board: t.id, p_note: note, p_approve: true });
+          location.href = `?b=${slug}`;
+        }, "primary"), el("button", { type: "button", class: "link", onclick: () => { board.note_approved_at = null; render(); } }, "Keep editing")));
+    }).catch(e => box.replaceChildren(errBox(e)));
+    return box;
   }
 
   // ── Toast with Undo ──
@@ -372,7 +447,7 @@ export async function ownerCull(board, { cropper } = {}) {
     dock.asked(question || (label ? `Your honest take on ${label}?` : "Your honest take?"));
     const stop = dock.thinking(c ? `Looking at ${caption(c).id}…` : "Thinking…");
     try {
-      const r = await take({ question, concept: c ? { ...c, label: caption(c).name } : null, src: c?.image_path ? await trimmedUrl(c.image_path) : null, kept: keptList().length, total: S.cands.length });
+      const r = await take({ question, concept: c ? { ...c, label: caption(c).name, comments: c.comments || null } : null, src: c?.image_path ? await trimmedUrl(c.image_path) : null, kept: keptList().length, total: S.cands.length });
       stop();
       if (c) S.takes[c.id] = r.take;
       dock.say(r.take, { verdicts: r.verdicts });
@@ -386,8 +461,10 @@ export async function ownerCull(board, { cropper } = {}) {
   }
   // The 24px check, offered (never applied) once per board per day.
   async function offer24({ manual = false } = {}) {
-    const pool = S.cands.filter(c => !c.archived_at && c.image_path);
+    // On the brand board, check what's on screen (one family), at most 48 at a time.
+    const pool = (brand ? active().filter(c => !c.archived_at) : S.cands.filter(c => !c.archived_at)).filter(c => c.image_path && !c.kept).slice(0, 48);
     if (!pool.length) return;
+    if (brand && manual && !S.family) dock.say(`Checking the first ${pool.length} on screen. Pick a family to check that family.`);
     const stop = manual ? dock.thinking("Checking every concept at 24px…") : () => {};
     try {
       const { fail, why } = await check24(pool, (c) => trimmedUrl(c.image_path));
@@ -420,6 +497,6 @@ export async function ownerCull(board, { cropper } = {}) {
   // Coach looks once a day, quietly: a badge on the dock, never a pop-up.
   try {
     const k = `coach-24:${board.id}:${new Date().toISOString().slice(0, 10)}`;
-    if (!localStorage.getItem(k) && S.cands.filter(c => !c.archived_at && !c.kept).length >= 8) { localStorage.setItem(k, "1"); setTimeout(() => offer24(), 2500); }
+    if (!brand && !localStorage.getItem(k) && S.cands.filter(c => !c.archived_at && !c.kept).length >= 8) { localStorage.setItem(k, "1"); setTimeout(() => offer24(), 2500); }
   } catch { /* private window: skip the daily look */ }
 }
