@@ -2,23 +2,42 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>Squire practice room</title>
-<style>
-  :root { color-scheme: dark; --navy: #0A1324; --ink: #F3EEE2; --ink-2: #B9C0CF; --gold: #D4AF5A; --orange: #F64B19; }
-  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--navy); color: var(--ink); font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding-inline: 20px; }
-  main { max-width: 34rem; display: grid; gap: 12px; }
-  .mark { color: var(--orange); font-size: 28px; }
-  h1 { margin: 0; font-size: 28px; }
-  p { margin: 0; color: var(--ink-2); }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Squire.Coach</title>
+<meta name="description" content="Squire.Coach is a personal coach you talk to out loud. It remembers what matters to you, helps you plan your day, and never changes your record without your OK.">
+<link rel="stylesheet" href="site.css">
 </head>
 <body>
+<header class="site">
+  <a class="name" href="./">Squire.Coach</a>
+  <nav aria-label="Site"><a href="./" aria-current="page">Home</a><a href="privacy/">Privacy</a><a href="terms/">Terms</a></nav>
+</header>
 <main>
-  <span class="mark" aria-hidden="true">✦</span>
-  <h1>Squire practice room</h1>
-  <p>Opening soon. If someone invited you, use the link they sent once the room opens.</p>
+  <p class="draft"><b>Draft, pending counsel review.</b> Squire.Coach is in a private beta. These pages describe how it works today and may change before a public launch.</p>
+
+  <h1>A coach you talk to, that remembers what matters to you</h1>
+  <p class="lede">Squire.Coach lives in a side panel in Chrome. You talk to it out loud. It helps you plan tomorrow, keeps your projects and open items straight, gives you a short daily lesson, and picks up where you left off yesterday.</p>
+
+  <h2>What it does</h2>
+  <div class="cards">
+    <div class="card"><h3>Plans your day with you</h3><p>A two-minute conversation each evening turns everything on your mind into a short, real plan. You approve it; Coach never fills your day on its own.</p></div>
+    <div class="card"><h3>Remembers, so you don't repeat yourself</h3><p>What you tell it is kept in your own record. You can read every word, change it, or delete it.</p></div>
+    <div class="card"><h3>Keeps your open items</h3><p>Things you owe, by project. Coach can suggest one; it only becomes yours when you accept it.</p></div>
+    <div class="card"><h3>A short lesson each day</h3><p>Aimed at what you're working on, with a video when one fits.</p></div>
+  </div>
+
+  <h2>Your record, your say</h2>
+  <ul>
+    <li><b>Nothing about you changes without your OK.</b> Every change to what Coach knows about you shows up first on screen, to approve, edit or skip.</li>
+    <li><b>A receipt for every change.</b> Each saved change is recorded with the date and what changed.</li>
+    <li><b>Two ways to keep it:</b> in your own private GitHub repository with your own keys, or in a Squire account (beta) that you sign in to with Google.</li>
+    <li><b>No ads, and your information is never sold.</b></li>
+  </ul>
+  <p>The details, including every outside service your words pass through, are in the <a href="privacy/">privacy policy</a>. The rules for using Squire.Coach are in the <a href="terms/">terms of service</a>.</p>
+
+  <h2>Contact</h2>
+  <p>Questions, or want your data deleted: <a href="mailto:rick@squire.coach">rick@squire.coach</a> (rick@squire.coach).</p>
 </main>
+<footer class="site"><span>Squire.Coach · private beta</span><a href="privacy/">Privacy</a><a href="terms/">Terms</a></footer>
 </body>
 </html>

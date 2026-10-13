@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Privacy · Squire.Coach</title>
+<meta name="description" content="What Squire.Coach stores, where it's kept, and which outside services your words pass through.">
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+<header class="site">
+  <a class="name" href="../">Squire.Coach</a>
+  <nav aria-label="Site"><a href="../">Home</a><a href="./" aria-current="page">Privacy</a><a href="../terms/">Terms</a></nav>
+</header>
+<main>
+  <p class="draft"><b>Draft, pending counsel review.</b> This describes how Squire.Coach works during its private beta. It is not final legal text.</p>
+  <h1>Privacy policy</h1>
+  <p class="meta">Last updated October 13, 2026 · Squire.Coach, run by Rick Cotton · <a href="mailto:rick@squire.coach">rick@squire.coach</a></p>
+
+  <p class="lede">The short version: what Coach knows about you lives in a record you can read, change and delete. Nothing in it changes without your OK. To work, your words pass through a few outside services, listed below. There are no ads, and we never sell your information.</p>
+
+  <h2>Two ways to use Coach</h2>
+  <div class="cards">
+    <div class="card"><h3>With your own GitHub repository</h3><p>Your record is kept in a private GitHub repository you own, and you use your own keys for Claude and the voice. We don't have a copy.</p></div>
+    <div class="card"><h3>With a Squire account (beta)</h3><p>You sign in with Google. Your record is kept in our database (Supabase, United States), separated so only your account can read it.</p></div>
+  </div>
+
+  <h2>What Coach keeps</h2>
+  <ul>
+    <li><b>Your record:</b> what you've told Coach about yourself, your goals, projects and open items, your daily plans, your profile read and your reactions to it, notes and reminders, and a log of each conversation.</li>
+    <li><b>Voice notes:</b> the written transcript. The audio is kept only if you turn on "Keep the audio of my voice notes".</li>
+    <li><b>Receipts:</b> each change to your record is recorded with its date and what changed. In GitHub mode, the receipt is the commit in your repository.</li>
+    <li><b>Squire accounts only:</b> your Google name and email, your settings, and how many requests you made each day (to keep within limits and costs). If you choose to share your answers to lesson check-ins, they are stored without your name or your words, only as anonymous counts.</li>
+    <li><b>In this browser:</b> your settings and any keys you entered stay in Chrome's storage for the extension on this computer. They're never sent to us.</li>
+  </ul>
+
+  <h2>What Coach never does</h2>
+  <ul>
+    <li>Change what it knows about you without showing you first and getting your OK. (Conversation logs and other activity logs are written as you go so nothing is lost; you can still see and delete them.)</li>
+    <li>Show ads, sell your information, or share it with anyone for marketing.</li>
+    <li>Record keystrokes, passwords, or what you type into web pages.</li>
+  </ul>
+
+  <h2>Where your words go to make Coach work</h2>
+  <p>These outside services receive only what they need, when they're needed:</p>
+  <div class="table-wrap">
+  <table>
+    <tr><th>Service</th><th>What it receives</th><th>When</th></tr>
+    <tr><td><b>Anthropic (Claude)</b></td><td>What you say to Coach and the parts of your record Coach needs to answer, so Claude can write the reply.</td><td>Every conversation, plan and lesson. GitHub mode uses your own Claude key; Squire accounts go through our server, which holds the key.</td></tr>
+    <tr><td><b>Google Chrome speech recognition</b></td><td>Your voice while the microphone is on. Chrome sends it to Google to turn it into text.</td><td>Only while you're talking to Coach. The mic is never left on in the background.</td></tr>
+    <tr><td><b>ElevenLabs</b></td><td>The text of Coach's replies, to turn into speech.</td><td>Only if the premium voice is on. Otherwise Coach uses your browser's built-in voice.</td></tr>
+    <tr><td><b>YouTube (Google)</b></td><td>Search words for the day's lesson topic, never your name or personal details.</td><td>When a lesson looks for a video.</td></tr>
+    <tr><td><b>Supabase</b></td><td>Squire accounts: your record, sign-in and receipts, kept in the United States.</td><td>Squire accounts only.</td></tr>
+    <tr><td><b>Google sign-in</b></td><td>Google tells us your name, email and profile picture when you sign in.</td><td>Squire accounts and invited reviewers.</td></tr>
+    <tr><td><b>GitHub</b></td><td>Your record, in your own repository. If you add a read-only token, Coach also reads your other repositories' README and plan files and recent commit messages.</td><td>GitHub mode only.</td></tr>
+  </table>
+  </div>
+  <p>Each of these companies handles data under its own privacy policy and terms.</p>
+
+  <h2>Watch (off unless you turn it on)</h2>
+  <p>If you turn on Watch, it notes which sites you're on and for how long, so Coach can tell which of your goals you've finished. That activity stays on your computer and is deleted after 7 days. It never includes incognito windows, sites on your block list, keystrokes or anything you type. If you also turn on matching, short summaries (site names and minutes, never web addresses) go to Claude about once an hour, and each send gets a receipt. You can pause it, export it, or delete it at any time.</p>
+
+  <h2>Invited reviewers</h2>
+  <p>If someone invites you to give feedback on a page like a logo board or a practice room, you sign in with Google. Your answers and the time you submitted are stored with your name for the person who invited you. Other reviewers can't see your answers until they've submitted their own.</p>
+
+  <h2>Keeping and deleting</h2>
+  <ul>
+    <li><b>GitHub mode:</b> your record is your repository. Delete files or the whole repository whenever you like.</li>
+    <li><b>Squire accounts:</b> email us to delete your account and everything in it. Watch data has its own Delete button, with 30 days to change your mind.</li>
+    <li><b>Keys in this browser:</b> Settings has "Forget my keys".</li>
+  </ul>
+
+  <h2>Security</h2>
+  <p>Squire account data is separated by account in the database, so one account can't read another's. Connections are encrypted. No system is perfect; if something goes wrong that affects your data, we'll tell you.</p>
+
+  <h2>Children</h2>
+  <p>Squire.Coach is not meant for anyone under 18.</p>
+
+  <h2>Changes</h2>
+  <p>If this policy changes in a way that matters, we'll say so in Coach before it takes effect.</p>
+
+  <h2>Contact</h2>
+  <p><a href="mailto:rick@squire.coach">rick@squire.coach</a> (rick@squire.coach)</p>
+</main>
+<footer class="site"><span>Squire.Coach · draft, pending counsel review</span><a href="../">Home</a><a href="../terms/">Terms</a></footer>
+</body>
+</html>
