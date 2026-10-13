@@ -442,3 +442,80 @@ main { padding-bottom: 140px; }
 .brand-facts .record p:not(.sub) { font-size: 16px; }
 .noimg { display: grid; place-items: center; position: absolute; inset: 0; color: var(--signal-deep); font-size: 13px; background: repeating-linear-gradient(135deg, transparent 0 10px, rgb(200 55 6 / .05) 10px 20px); }
 .brand-facts button { justify-self: start; }
+
+/* ── The constitution board: the text is the record. Clause numbers hang in the
+   margin (the cards are a sequence); the text is Newsreader on paper; Coach's
+   words carry the Coach mark and a Signal rule so they never read as Rick's. ── */
+.cc-how { display: flex; gap: 10px; align-items: flex-start; max-width: 78ch; font-size: 14px; color: var(--graphite); }
+.cc-how b { font-weight: 500; color: var(--ink); }
+.cmark { width: 18px; height: 18px; flex: none; color: var(--ink); margin-top: 1px; }
+.cc-tally { display: flex; gap: 6px 18px; flex-wrap: wrap; justify-content: end; width: auto; font-size: 15px; }
+.cc-tally b { font-size: 28px; font-weight: 700; letter-spacing: -.02em; margin-right: 2px; }
+.cc-filters label { grid-auto-flow: row; min-width: 160px; flex: 0 1 200px; font-size: 13px; color: var(--graphite); }
+.cc-filters select { font-size: 15px; padding: 8px 10px; }
+.cc-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 40px; align-items: start; }
+.cc-contents { position: sticky; top: calc(16px + env(safe-area-inset-top, 0px)); max-height: calc(100vh - 32px); overflow: auto; display: grid; gap: 18px; font-size: 13px; padding-right: 8px; }
+.cc-contents .p { font-weight: 500; font-size: 14px; border-bottom: 1px solid var(--ink); padding-bottom: 4px; margin-bottom: 6px; }
+.cc-contents ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.cc-contents a { color: var(--graphite); text-decoration: none; display: flex; gap: 8px; padding: 2px 0; line-height: 1.3; }
+.cc-contents a:hover { color: var(--ink); text-decoration: underline; }
+.cc-contents .n { color: var(--ink); min-width: 2ch; }
+.cc-docket { display: grid; gap: 0; border-top: 1px solid var(--ink); }
+.cc-card { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 0 20px; padding: 22px 0 24px; border-bottom: 1px solid var(--hair-2); scroll-margin-top: 16px; cursor: default; }
+.cc-card:focus-visible { outline-offset: -2px; }
+.cc-card.focus { box-shadow: inset 3px 0 0 var(--signal); }
+.cc-no { font-size: 44px; line-height: .9; font-weight: 700; letter-spacing: -.04em; text-align: right; padding-right: 4px; color: var(--ink); }
+.cc-main { display: grid; gap: 12px; justify-items: start; min-width: 0; }
+.cc-head { display: grid; gap: 4px; }
+.cc-head h3 { font-size: 19px; font-weight: 500; line-height: 1.3; }
+.cc-ref { color: var(--graphite); font-weight: 400; }
+.cc-meta { font-size: 13px; color: var(--graphite); display: flex; gap: 6px 8px; flex-wrap: wrap; align-items: center; }
+.st { color: var(--ink); font-weight: 500; }
+.st::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border: 1.5px solid var(--ink); vertical-align: 1px; }
+.st.agreed::before, .st.adopted::before { background: var(--ink); }
+.st.open::before { border-radius: 50%; border-color: var(--signal-deep); }
+.st.parked::before { border-style: dashed; border-color: var(--graphite); }
+.tags { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.tag { border: 1px solid var(--hair-2); padding: 1px 7px; border-radius: 999px; font-size: 12px; color: var(--ink); background: var(--paper); }
+.cc-text { font: 400 18px/1.6 var(--record); max-width: 68ch; display: grid; gap: 10px; color: var(--ink); }
+.cc-text.clamp { max-height: calc(1.6em * 7); overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
+.cc-note { font-size: 14px; max-width: 68ch; }
+.cc-note b { font-weight: 500; }
+.coach-says, .coach-take { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; max-width: 68ch; padding: 10px 14px; background: var(--paper); border-left: 2px solid var(--signal); }
+.coach-take { background: transparent; border-left-color: var(--hair-2); }
+.coach-says .who, .coach-take .who { font-size: 13px; font-weight: 500; }
+.coach-says p:not(.who), .coach-take p:not(.who) { font-size: 15px; line-height: 1.5; }
+.brand-facts .coach-says, .brand-facts .coach-take { display: grid; grid-template-columns: 1fr; gap: 4px; }
+.take-btn { font-size: 14px; }
+.cc-archive, .cc-history { margin-top: 20px; font-size: 14px; }
+.cc-archive summary, .cc-history summary { cursor: pointer; font-weight: 500; padding: 6px 0; }
+.cc-archive ul, .cc-history ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; }
+.cc-history { max-width: 78ch; }
+.cc-note-sec, .cc-ballot-sec { display: grid; gap: 12px; max-width: 78ch; padding-top: 24px; border-top: 1px solid var(--ink); }
+.cc-note-sec textarea { font: 400 17px/1.55 var(--record); min-height: 160px; }
+/* The ballot: one card, the text large, four plain choices. */
+.ballot-card { display: grid; gap: 18px; justify-items: start; max-width: 760px; }
+.ballot-card h1 { font-size: 26px; }
+.ballot-card .cc-text { font-size: 19px; }
+.ballot-card textarea { max-width: 68ch; }
+.progress { width: 100%; height: 2px; background: var(--hair); }
+.progress span { display: block; height: 100%; background: var(--ink); transition: width 200ms var(--ease); }
+.votes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; width: 100%; max-width: 560px; }
+.vote { justify-content: center; min-height: 48px; font-size: 15px; }
+.vote[aria-checked=true] { background: var(--ink); color: var(--paper); }
+.ballot-intro .record { max-width: 68ch; }
+.tablewrap { overflow-x: auto; width: 100%; }
+.cc-results .rrow summary { display: flex; gap: 8px 20px; flex-wrap: wrap; align-items: baseline; }
+.tally { display: flex; gap: 4px 14px; flex-wrap: wrap; font-size: 13px; color: var(--graphite); }
+.tally b { color: var(--ink); font-size: 16px; }
+@media (max-width: 900px) {
+  .cc-layout { grid-template-columns: 1fr; }
+  .cc-contents { display: none; }
+  .cc-tally { justify-content: start; }
+}
+@media (max-width: 640px) {
+  .cc-card { grid-template-columns: 44px minmax(0, 1fr); gap: 0 12px; }
+  .cc-no { font-size: 28px; }
+  .cc-text { font-size: 17px; }
+  .votes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

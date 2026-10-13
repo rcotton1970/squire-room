@@ -36,6 +36,7 @@ export async function ownerCull(board, { cropper, brand = false } = {}) {
     if (!S.base) { S.base = brand ? S.cands.filter(c => !c.archived_at).length : S.cands.length; prefetchUrls(S.cands.map(c => c.image_path)).catch(() => {}); }
     const { data } = await sb.from("board_events").select("id, at, actor, action, concepts, summary, undone_at").eq("board_id", board.id).order("at", { ascending: false }).limit(200);
     S.events = data || [];
+    for (const c of S.cands) if (c.coach_take && !S.takes[c.id]) S.takes[c.id] = c.coach_take;
     if (!S.focus || !S.cands.some(c => c.id === S.focus && !c.archived_at)) S.focus = (active().find(c => !c.kept) || active()[0])?.id || null;
   }
   // Brand families run newest work first (the manifest is in the order things were made).
@@ -289,6 +290,8 @@ export async function ownerCull(board, { cropper, brand = false } = {}) {
             c.description ? el("p", {}, c.description) : null,
             el("p", { class: "sub" }, [c.family, c.shelf === "featured" ? "Featured" : null, c.source && /: /.test(c.source) ? c.source.replace(/^BRAND-MANIFEST\.md: /, "") : null].filter(Boolean).join(". ")),
             c.comments ? el("div", { class: "record" }, el("p", { class: "sub" }, "Your comments"), el("p", {}, c.comments)) : el("p", { class: "sub" }, "No comments from you on this one."),
+            c.coach_line ? el("div", { class: "coach-says" }, el("p", { class: "who" }, "Coach says ", el("span", { class: "sub" }, "· your approved wording")), el("p", {}, c.coach_line)) : null,
+            c.coach_take ? el("div", { class: "coach-take" }, el("p", { class: "who" }, "Coach\u2019s take ", el("span", { class: "sub" }, "· Coach\u2019s own view, not your ruling")), el("p", {}, c.coach_take)) : null,
             el("button", { type: "button", class: "small", onclick: () => run(rpc("board_curate", { p_concept: c.id, p_shelf: null, p_starred: !c.starred, p_family: null }).then(load).then(render)) }, c.starred ? "Unstar" : "Star")) : null,
           notes,
           el("div", { class: "row" }, el("label", { class: "button small" }, "Replace image", replace), cropper ? el("button", { type: "button", class: "small", onclick: () => cropper(board, c, async () => { await load(); S.loupe = true; render(); }) }, "Crop") : null))),
@@ -450,6 +453,8 @@ export async function ownerCull(board, { cropper, brand = false } = {}) {
       const r = await take({ question, concept: c ? { ...c, label: caption(c).name, comments: c.comments || null } : null, src: c?.image_path ? await trimmedUrl(c.image_path) : null, kept: keptList().length, total: S.cands.length });
       stop();
       if (c) S.takes[c.id] = r.take;
+      // On the brand board Coach's take is kept (Coach in the side panel can re-word it, on an Approve card).
+      if (c && brand && !question) rpc("board_coach_words", { p_concept: c.id, p_kind: "take", p_text: r.take.slice(0, 1200), p_neutral: false }).then(() => { const x = byId(c.id); if (x) { x.coach_take = r.take; x.coach_take_at = new Date().toISOString(); } }).catch(() => {});
       dock.say(r.take, { verdicts: r.verdicts });
       if (c && !c.archived_at && !c.kept && r.call === "archive") dock.offer({ text: `Archive ${caption(c).id}?`, actions: [
         { label: "Archive it", primary: true, run: async () => { if (byId(c.id)?.archived_at) return "Already archived."; await cull("archive", [c.id], { actor: "coach", summary: `Archived ${nameOf(c)} on Coach\u2019s suggestion.`, advance: false }); return `Archived ${caption(c).id}. Undo is in the corner and in History.`; } },

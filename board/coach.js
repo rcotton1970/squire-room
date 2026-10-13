@@ -128,3 +128,23 @@ export async function teamSummary(stats, { finished, invited }) {
   return ask({ system: "You are Coach, speaking to the founder. Summarize a team's blind first-impression ratings of logo concepts in about 90 words, plain spoken English, no lists or markdown. Lead with where the team agrees (clear leaders and clear misses, with the words people used), then where it disagrees (wide spreads, mixed words), then one honest next step. Concepts are known only by letter. Don't invent anything not in the data.",
     content: [{ type: "text", text: `${finished} of ${invited} reviewers have submitted.\n${lines}` }], maxTokens: 600 });
 }
+
+// ── The constitution board ──
+// Coach's take on a card: honest and its own, judged as founding text. Never a ruling for Rick.
+const CC_VOICE = "You are Coach, Rick's coach, reading Squire's Constitution (a trust and receipt layer for AI agents) card by card with him before his partners vote. Be honest, short and direct; no flattery, no filler. Judge each card as founding text: is it clear to a non-lawyer, can Squire actually keep it today, does it contradict another card, would it hold up if a regulator or a skeptical partner read it? You give your own view; Rick makes the calls. Refer to cards by their number (CC-14). Never invent text the card doesn't have.";
+export async function cardTake({ card, question, others = [] }) {
+  const text = await ask({ system: CC_VOICE, maxTokens: 700, json: true, content: [{ type: "text", text:
+    `${card.ref} (${card.family || "no part"}, ${card.card_status}): ${card.label}\n"""${card.description}"""\n` +
+    (others.length ? `Other cards, for cross-reference (titles only): ${others.map(c => `${c.ref} ${c.label}`).join("; ")}\n` : "") +
+    `${card.notes ? `Rick's private note on it: "${card.notes}"\n` : ""}Rick asks: ${question || "What's your honest take on this card?"}\n` +
+    `Reply with JSON only: {"take":"2 to 4 sentences, under 80 words: what holds, what doesn't, and your call","call":"ready|tighten|rethink"}` }] });
+  try { const j = JSON.parse(text.match(/\{[\s\S]*\}/)[0]); return { take: typeset(String(j.take || "")), call: ["ready", "tighten", "rethink"].includes(j.call) ? j.call : null }; }
+  catch { return { take: typeset(text), call: null }; }
+}
+// A neutral draft of the note partners read first: what they're voting on and how. Never Rick's position.
+export async function ballotNote({ board, cards }) {
+  const parts = Object.entries(cards.reduce((m, c) => ((m[c.family || "Other"] = (m[c.family || "Other"] || 0) + 1), m), {})).map(([p, n]) => `${p} (${n})`).join(", ");
+  const text = await ask({ system: "You write in Rick's voice (first person, plain, warm, direct) to his four co-founders. Neutral by rule: you explain what they're voting on and how, and never say or hint how Rick hopes anyone votes, which cards he favors, or which are contested.", maxTokens: 1200, json: true,
+    content: [{ type: "text", text: `Board: ${board.title}. ${cards.length} cards, in parts: ${parts}. Each partner votes on every card, blind, in their own random order: Adopt, Amend (would sign with changes, and says which), Reject, or Abstain. One submission each, with a receipt; nobody sees anyone else's votes until they've sent their own.\nWrite the note partners read before voting, under 150 words, no headings or bullets: what this is, how to vote, that Amend needs a line on what to change, and roughly how long it takes. Reply with JSON only: {"note":"…"}` }] });
+  try { return typeset(String(JSON.parse(text.match(/\{[\s\S]*\}/)[0]).note || "").trim()); } catch { return typeset(text.trim()); }
+}

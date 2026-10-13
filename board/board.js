@@ -5,6 +5,7 @@
 // signed links, only for the board's owner or an invited reviewer.
 import { CFG, sb, app, SLUG, INVITE, ENCOURAGE, el, show, errBox, speak, playButton, imageUrl, trimmedUrl, BOARD_COLS, uploadImage, rpc, shuffle, when, armed, roundsList, caption } from "./core.js";
 import { ownerCull } from "./cull.js";
+import { ownerConstitution, ballot, ballotResults, voteAsPartner } from "./constitution.js";
 import { createDock } from "./dock.js";
 import { setupCoach, NEUTRAL, teamSummary } from "./coach.js";
 setupCoach({ url: CFG.url, key: CFG.key, session: async () => (await sb.auth.getSession()).data.session });
@@ -16,6 +17,11 @@ async function start() {
   if (!session) return signInScreen();
   const me = session.user;
   let { data: board } = await sb.from("boards").select(BOARD_COLS).eq("slug", SLUG).maybeSingle();
+  const view = new URLSearchParams(location.search).get("view");
+  if (board?.owners?.includes(me.id) && board.kind === "constitution") {
+    if (view === "ballot") { const { data: rv } = await sb.from("board_reviewers").select("user_id").eq("board_id", board.id).eq("user_id", me.id).maybeSingle(); return ballot(board, me, { preview: board.status === "draft" || !rv || new URLSearchParams(location.search).has("preview"), signedInAs: signedInAs(me) }); }
+    return board.status === "draft" ? ownerConstitution(board) : ownerLive(board);
+  }
   if (board?.owners?.includes(me.id)) return board.kind === "brand" ? (new URLSearchParams(location.search).get("view") === "shelves" ? ownerBrand(board) : ownerCull(board, { cropper, brand: true })) : board.status === "draft" ? ownerCull(board, { cropper }) : ownerLive(board);
   if (!board || INVITE) {
     if (!INVITE) return show(plainPage("This board needs your invite link", el("p", {}, "Open the link you were sent. Each reviewer has their own."), signedInAs(me)));
@@ -24,7 +30,7 @@ async function start() {
     sessionStorage.removeItem(`invite:${SLUG}`);
     ({ data: board } = await sb.from("boards").select(BOARD_COLS).eq("slug", SLUG).maybeSingle());
   }
-  return reviewer(board, me);
+  return board?.kind === "constitution" ? ballot(board, me, { signedInAs: signedInAs(me) }) : reviewer(board, me);
 }
 const signedInAs = (me) => el("p", { class: "sub signed" }, `Signed in as ${me.email}. `, el("button", { type: "button", class: "link", onclick: async () => { await sb.auth.signOut(); location.reload(); } }, "Sign out"));
 const plainPage = (title, ...kids) => el("section", { class: "plain" }, el("h1", {}, title), ...kids);
@@ -36,7 +42,8 @@ function signInScreen() {
     const { error } = await sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${location.origin}${location.pathname}?b=${SLUG}`, queryParams: { prompt: "select_account" } } });
     if (error) { b.disabled = false; b.after(errBox(error)); }
   };
-  show(plainPage("Squire logo review", el("p", { class: "lede" }, "A few minutes, one gut call per logo. Sign in with Google so your answers count once and stay yours."), b,
+  const cc = /constitution/.test(SLUG);
+  show(plainPage(cc ? "Squire Constitution ballot" : "Squire logo review", el("p", { class: "lede" }, cc ? "One vote per card. Sign in with Google so your votes count once and stay yours." : "A few minutes, one gut call per logo. Sign in with Google so your answers count once and stay yours."), b,
     el("p", { class: "sub" }, INVITE ? "Your invite link is ready. It opens after you sign in." : "Use the link you were sent.")));
 }
 
@@ -376,6 +383,7 @@ function newBoardButton() {
 
 // ── Owner: the board is live (or closed). Reviewers, links, results; Coach's read once everyone is in. ──
 async function ownerLive(board) {
+  const me = (await sb.auth.getSession()).data.session?.user || {};
   const [{ data: invites }, { data: subs }] = await Promise.all([
     sb.from("board_invites").select("id, label, email, claimed_by, claimed_at, revoked_at, created_at").eq("board_id", board.id).order("created_at"),
     sb.from("board_submissions").select("user_id, submitted_at, receipt_hash").eq("board_id", board.id),
@@ -405,11 +413,15 @@ async function ownerLive(board) {
     out.replaceChildren(el("div", { class: "link-box" }, el("p", {}, `${label.value.trim()}'s link. It's shown once; send it to them privately.`), el("code", {}, link), el("div", { class: "row" }, copy, el("button", { type: "button", class: "link", onclick: () => location.reload() }, "Done"))));
     label.value = ""; email.value = "";
   };
-  const results = await resultsList(board, { owner: true });
+  const cc = board.kind === "constitution";
+  const results = cc ? await ballotResults(board) : await resultsList(board, { owner: true });
   const invited = (invites || []).filter(i => !i.revoked_at).length, finished = (invites || []).filter(i => !i.revoked_at && done.has(i.claimed_by)).length;
   const allIn = invited > 0 && finished === invited;
   const read = el("div", { class: "coach-read" });
-  if (allIn) {
+  if (cc) read.append(el("p", { class: "sub" }, invited ? `${finished} of ${invited} ${invited === 1 ? "partner has" : "partners have"} sent their votes.` : "Make a link for each partner below."),
+    el("div", { class: "row" }, (invites || []).some(i => i.claimed_by === me.id) ? el("a", { class: "button", href: `?b=${board.slug}&view=ballot` }, done.has(me.id) ? "Your ballot (sent)" : "Your own ballot") : armed("Vote as a partner", "Makes your own link and opens it. Tap again", () => voteAsPartner(board)),
+      el("a", { class: "button", href: `?b=${board.slug}&view=ballot&preview=1` }, "Preview the ballot")));
+  else if (allIn) {
     const b = el("button", { type: "button", class: "primary" }, "Coach's read");
     b.onclick = async () => {
       b.disabled = true; read.replaceChildren(el("p", { class: "sub" }, "Coach is reading the results…"));
@@ -428,13 +440,13 @@ async function ownerLive(board) {
     el("span", { class: "sub" }, opened ? "The set is locked because a reviewer has opened a link. To change it, start a new round; this round's answers stay as the record." : ""));
   // Coach on the live board: neutral until everyone's in.
   const dock = createDock({ mode: "reviewer", key: `${board.id}:live`, hello: null });
-  dock.say(allIn ? "Everyone's in. Tap \"Coach's read\" for where the team agrees and disagrees." : `I'm keeping quiet on the concepts until everyone has answered. ${finished} of ${invited} so far.`);
+  dock.say(cc ? `The ballot is open, so the cards and my lines are locked. ${finished} of ${invited} sent so far.` : allIn ? "Everyone's in. Tap \"Coach's read\" for where the team agrees and disagrees." : `I'm keeping quiet on the concepts until everyone has answered. ${finished} of ${invited} so far.`);
   show(el("header", { class: "top" }, el("div", { class: "title" }, el("h1", {}, board.title),
       el("p", { class: "sub" }, closed ? `Round ${board.round}, closed.` : `Round ${board.round}, live since ${new Date(board.approved_at || Date.now()).toLocaleDateString(undefined, { day: "numeric", month: "short" })}.`), await roundsList(board)),
-      invited ? el("div", { class: "counter" }, el("span", { class: "num" }, String(finished)), el("p", {}, `of ${invited} ${invited === 1 ? "reviewer" : "reviewers"} finished.`)) : el("div", { class: "counter" }, el("p", {}, "No reviewers yet."))),
-    el("section", { class: "results-sec" }, el("div", { class: "sec-head" }, el("h2", {}, "Results"), el("p", { class: "sub" }, "Submitted answers only. Open a row for comments, by name.")), read, finished ? results : null),
-    closed ? null : el("section", { class: "people-sec" }, el("h2", {}, "Reviewers"), people, el("div", { class: "invite" }, label, email, add), out),
-    el("section", { class: "brief-sec" }, el("h2", {}, "The brief they read"), el("div", { class: "record" }, el("p", {}, board.brief))),
+      invited ? el("div", { class: "counter" }, el("span", { class: "num" }, String(finished)), el("p", {}, `of ${invited} ${cc ? (invited === 1 ? "partner" : "partners") : invited === 1 ? "reviewer" : "reviewers"} finished.`)) : el("div", { class: "counter" }, el("p", {}, cc ? "No partners yet." : "No reviewers yet."))),
+    el("section", { class: "results-sec" }, el("div", { class: "sec-head" }, el("h2", {}, cc ? "Votes" : "Results"), el("p", { class: "sub" }, cc ? "Sent ballots only. Open a card for comments, by name." : "Submitted answers only. Open a row for comments, by name.")), read, finished ? results : null),
+    closed ? null : el("section", { class: "people-sec" }, el("h2", {}, cc ? "Partners" : "Reviewers"), people, el("div", { class: "invite" }, label, email, add), out),
+    el("section", { class: "brief-sec" }, el("h2", {}, cc ? "The note they read" : "The brief they read"), el("div", { class: "record" }, el("p", {}, board.brief))),
     changes);
 }
 
