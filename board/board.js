@@ -53,7 +53,7 @@ async function start() {
   if (!session) return signInScreen();
   const me = session.user;
   let { data: board } = await sb.from("boards").select(BOARD_COLS).eq("slug", SLUG).maybeSingle();
-  if (board?.owners?.includes(me.id)) return board.status === "draft" ? ownerDraft(board) : ownerLive(board);
+  if (board?.owners?.includes(me.id)) return board.kind === "brand" ? ownerBrand(board) : board.status === "draft" ? ownerDraft(board) : ownerLive(board);
   if (!board || INVITE) {
     if (!INVITE) return show(el("div", { class: "card" }, el("h1", {}, "This board needs your invite link"), el("p", { class: "muted" }, "Open the link you were sent. Each reviewer has their own."), signedInAs(me)));
     const { error } = await sb.rpc("board_claim", { p_slug: SLUG, p_token: INVITE });
@@ -206,7 +206,7 @@ async function resultsList(board, { owner }) {
 }
 
 // ── Owner: draft mode. Nothing is shared while a board is a draft. ──
-const BOARD_COLS = "id, slug, title, brief, status, owners, approved_at, series, round, parent_board";
+const BOARD_COLS = "id, slug, title, brief, status, owners, approved_at, series, round, parent_board, kind";
 const IMAGE_TYPES = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
 async function uploadImage(board, blob) {
   const ext = IMAGE_TYPES[blob.type];
@@ -323,6 +323,107 @@ async function ownerDraft(board, ui = { tab: "concepts", picked: new Set() }) {
       await roundsList(board), newBoardButton()),
     tabBar, (tabs.find(t => t[0] === ui.tab) || tabs[0])[2], msg,
     el("div", { class: "sticky row" }, count, preview, live));
+}
+
+// ── Owner: the private brand board. Featured · Reviewed · Archive, grouped by family. ──
+const SHELVES = [["featured", "Featured"], ["reviewed", "Reviewed"], ["archive", "Archive"]];
+const shelfOf = (c) => (c.archived_at ? "archive" : c.shelf || "reviewed");
+async function ownerBrand(board, ui = { tab: "featured", picked: new Set(), sent: null }) {
+  const cands = await rpc("board_candidates", { p_board: board.id });
+  const me = (await sb.auth.getUser()).data.user;
+  for (const id of [...ui.picked]) if (!cands.some(c => c.id === id && !c.archived_at && c.image_path)) ui.picked.delete(id);
+  const again = (tab = ui.tab) => ownerBrand(board, { ...ui, tab }).catch(e => show(el("div", { class: "card" }, errBox(e))));
+  const msg = el("p", { class: "err" });
+  const act = async (run) => { msg.textContent = ""; try { await run(); ui.sent = null; await again(); } catch (e) { msg.textContent = e.message || String(e); } };
+  const active = cands.filter(c => !c.archived_at).sort((a, b) => a.sort_order - b.sort_order);
+  const missing = cands.filter(c => c.image_missing);
+
+  const upload = el("input", { type: "file", accept: "image/png,image/jpeg,image/webp", multiple: "", class: "file" });
+  upload.onchange = () => act(async () => { for (const f of upload.files) { const p = await uploadImage(board, f); await rpc("board_add_concept", { p_board: board.id, p_image_path: p, p_label: f.name.replace(/\.[^.]+$/, "").slice(0, 80) }); } });
+
+  // Moving within what you see (same shelf and family): rebuild the whole order once.
+  const moveWithin = (c, group, to) => act(async () => {
+    const ids = active.map(x => x.id).filter(id => id !== c.id);
+    const others = group.filter(x => x.id !== c.id);
+    const anchor = to === "top" ? others[0] : to === "up" ? others[Math.max(0, group.indexOf(c) - 1)] : others[Math.min(others.length - 1, group.indexOf(c))];
+    let at = ids.indexOf(anchor.id) + (to === "down" ? 1 : 0);
+    ids.splice(at, 0, c.id);
+    await rpc("board_reorder", { p_board: board.id, p_concepts: ids });
+  });
+  const moveTo = (c, shelf) => act(async () => {
+    if (shelf === "archive") return rpc("board_archive", { p_concept: c.id, p_archive: true });
+    if (c.archived_at) await rpc("board_archive", { p_concept: c.id, p_archive: false });
+    await rpc("board_curate", { p_concept: c.id, p_shelf: shelf, p_starred: null, p_family: null });
+  });
+
+  const card = (c, group, i) => {
+    const archived = Boolean(c.archived_at);
+    const imgBox = c.image_path ? (() => { const img = el("img", { alt: c.ref || c.label }); imageUrl(c.image_path).then(u => { img.src = u; }).catch(() => {}); return img; })()
+      : el("div", { class: "missing" }, "Image missing");
+    const star = el("button", { type: "button", class: `star${c.starred ? " on" : ""}`, "aria-pressed": String(c.starred), "aria-label": c.starred ? "Unstar" : "Star", disabled: archived ? "" : null,
+      onclick: () => act(() => rpc("board_curate", { p_concept: c.id, p_shelf: null, p_starred: !c.starred, p_family: null })) }, c.starred ? "★" : "☆");
+    const notes = el("textarea", { maxlength: "1000", placeholder: "Add a note", "aria-label": `Notes for ${c.ref || c.label}` }); notes.value = c.notes || "";
+    const saved = el("span", { class: "small" });
+    notes.onchange = async () => { try { await rpc("board_label", { p_concept: c.id, p_label: c.label, p_notes: notes.value }); saved.textContent = "Saved ✓"; } catch (e) { saved.textContent = e.message; } };
+    const family = el("input", { type: "text", maxlength: "60", value: c.family || "", placeholder: "Family", "aria-label": `Family for ${c.ref || c.label}` });
+    family.onchange = () => act(() => rpc("board_curate", { p_concept: c.id, p_shelf: null, p_starred: null, p_family: family.value }));
+    const shelf = el("select", { "aria-label": "Move to tab" }, SHELVES.map(([k, n]) => { const o = el("option", { value: k }, n); if (k === shelfOf(c)) o.selected = true; return o; }));
+    shelf.onchange = () => moveTo(c, shelf.value);
+    const file = el("input", { type: "file", accept: "image/png,image/jpeg,image/webp", class: "file" });
+    file.onchange = () => act(async () => { const p = await uploadImage(board, file.files[0]); await rpc("board_replace_image", { p_concept: c.id, p_image_path: p }); });
+    const pick = el("input", { type: "checkbox", "aria-label": `Select ${c.ref || c.label}`, disabled: archived || !c.image_path ? "" : null }); pick.checked = ui.picked.has(c.id);
+    pick.onchange = () => { pick.checked ? ui.picked.add(c.id) : ui.picked.delete(c.id); node.classList.toggle("on", pick.checked); updateBar(); };
+    const node = el("article", { class: `bcard${ui.picked.has(c.id) ? " on" : ""}${c.image_missing ? " flag" : ""}`, id: `card-${c.ref || c.id}` }, imgBox,
+      el("div", { class: "row head" }, el("label", { class: "pick" }, pick), el("b", { class: "ref" }, c.ref || `#${c.candidate_no}`), el("span", { class: `chip ${shelfOf(c)}` }, SHELVES.find(s => s[0] === shelfOf(c))[1]), star),
+      c.description ? el("p", { class: "desc" }, c.description) : null,
+      el("div", { class: "comments-v" }, el("span", { class: "small" }, "Your comments"), c.comments ? el("blockquote", {}, c.comments) : el("p", { class: "small" }, "No comments")),
+      archived ? el("p", { class: "small" }, `Archived ${when(c.archived_at)}`) : null,
+      c.image_missing ? el("p", { class: "err" }, "Image missing: add it with “Add image”.") : null,
+      notes, saved,
+      el("div", { class: "row tools" }, shelf, family),
+      el("div", { class: "row tools" },
+        archived ? null : el("button", { type: "button", disabled: i === 0 ? "" : null, onclick: () => moveWithin(c, group, "top") }, "Top"),
+        archived ? null : el("button", { type: "button", disabled: i === 0 ? "" : null, onclick: () => moveWithin(c, group, "up"), "aria-label": "Move up" }, "↑"),
+        archived ? null : el("button", { type: "button", disabled: i === group.length - 1 ? "" : null, onclick: () => moveWithin(c, group, "down"), "aria-label": "Move down" }, "↓"),
+        el("label", { class: "button" }, c.image_path ? "Replace" : "Add image", file),
+        c.original_path && c.original_path !== c.image_path ? el("button", { type: "button", onclick: () => act(() => rpc("board_replace_image", { p_concept: c.id, p_image_path: c.original_path })) }, "Use original") : null),
+      );
+    return node;
+  };
+
+  const inTab = cands.filter(c => shelfOf(c) === ui.tab).sort((a, b) => (a.archived_at && b.archived_at ? String(b.archived_at).localeCompare(a.archived_at) : a.sort_order - b.sort_order));
+  const families = [...new Set(inTab.map(c => c.family || ""))].sort((a, b) => (a === "") - (b === "") || a.localeCompare(b));
+  const tabBody = inTab.length ? el("div", { class: "grid" }, families.map(f => { const group = inTab.filter(c => (c.family || "") === f);
+      return el("section", { class: "family grid" }, el("h2", {}, `${f || "No family"} `, el("span", { class: "small" }, String(group.length))), el("div", { class: "sheet wide" }, group.map((c, i) => card(c, group, i)))); }))
+    : el("p", { class: "muted" }, ui.tab === "archive" ? "Nothing archived. Uncommented images land here, still visible." : `Nothing on ${SHELVES.find(s => s[0] === ui.tab)[1]} yet.`);
+
+  // Preview and send
+  const count = el("b", {});
+  const preview = el("button", { type: "button" }, "Preview as reviewer");
+  preview.onclick = () => previewBoard({ ...board, title: "Squire · first impressions", brief: "Go with your gut. There are no wrong answers." }, active.filter(c => ui.picked.has(c.id)), again);
+  const sendBox = el("div", { class: "row" });
+  const { data: teamBoards } = await sb.from("boards").select("id, slug, title, status, round, owners, kind").eq("kind", "first-impressions").order("created_at");
+  const targets = (teamBoards || []).filter(b => b.owners?.includes(me.id) && b.status === "draft");
+  const updateBar = () => {
+    const n = ui.picked.size;
+    count.textContent = `${n} selected`;
+    preview.disabled = !n;
+    if (ui.sent) return sendBox.replaceChildren(el("span", { class: "ok" }, `Sent ✓ `), el("a", { href: `?b=${ui.sent}` }, "Open the team logo board"));
+    if (!targets.length) return sendBox.replaceChildren(el("span", { class: "small" }, "The team logo board is live (locked). Start a new round there to send more."));
+    const target = el("select", { "aria-label": "Team board" }, targets.map(b => el("option", { value: b.id }, `${b.title} · round ${b.round}`)));
+    sendBox.replaceChildren(...[targets.length > 1 ? target : null, n ? armed(`Send ${n} to the team logo board`, "Adds them to its draft (blind letters when it goes live). Tap again", async () => {
+      ui.sent = await rpc("board_send", { p_brand: board.id, p_target: targets.length > 1 ? target.value : targets[0].id, p_concepts: [...ui.picked] });
+      ui.picked.clear(); await again();
+    }, "primary") : el("span", { class: "small" }, "Select cards to preview or send")].filter(Boolean));
+  };
+  updateBar();
+
+  const tabBar = el("div", { class: "tabs", role: "tablist" }, SHELVES.map(([k, n]) => el("button", { type: "button", role: "tab", "aria-selected": String(ui.tab === k), onclick: () => again(k) }, `${n} (${cands.filter(c => shelfOf(c) === k).length})`)));
+  show(el("div", { class: "card" }, el("h1", {}, board.title), el("p", { class: "muted" }, "Private: only you see this board. Uncommented images sit in Archive, still visible. Nothing is ever deleted."),
+      missing.length ? el("div", { class: "flag-box" }, el("b", {}, `Image missing (${missing.length}): `), missing.flatMap((c, i) => [i ? ", " : "", el("a", { href: `#card-${c.ref || c.id}`, onclick: (e) => { e.preventDefault(); again(shelfOf(c)).then(() => document.getElementById(`card-${c.ref || c.id}`)?.scrollIntoView({ block: "center" })); } }, c.ref || `#${c.candidate_no}`)])) : null,
+      el("div", { class: "row" }, el("label", { class: "button" }, "＋ Upload images", upload), el("span", { class: "small" }, "New images start on Reviewed."))),
+    tabBar, tabBody, msg,
+    el("div", { class: "sticky row" }, count, preview, sendBox));
 }
 
 // Crop with four sliders; saves a new image (the original is kept)

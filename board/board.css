@@ -86,3 +86,25 @@ canvas.crop { width: 100%; height: auto; background: #fff; border: 1px solid var
 .new-board { border-top: 1px solid var(--line); padding-top: 12px; }
 .sheet.wide { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
 label.button { position: relative; }
+/* Owner: the brand board */
+.bcard { background: #fff; border: 2px solid var(--line); border-radius: 12px; padding: 10px; display: grid; gap: 8px; align-content: start; }
+.bcard.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+.bcard.flag { border-color: var(--bad); }
+.bcard img, .bcard .missing { width: 100%; aspect-ratio: 16 / 10; object-fit: contain; border-radius: 8px; }
+.bcard .missing { display: grid; place-items: center; background: repeating-linear-gradient(45deg, #FBEDEA, #FBEDEA 8px, #fff 8px, #fff 16px); color: var(--bad); font-weight: 800; border: 1px dashed var(--bad); }
+.bcard .head { gap: 8px; }
+.bcard .ref { font-size: 17px; font-weight: 800; letter-spacing: .02em; }
+.bcard .desc { font-size: 14px; line-height: 1.4; }
+.bcard textarea { min-height: 48px; font-size: 14px; }
+.bcard input[type=text], .bcard select { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; min-width: 0; flex: 1; }
+.bcard .tools button, .bcard .tools .button { padding: 6px 10px; font-size: 13px; }
+.comments-v { display: grid; gap: 2px; }
+.comments-v blockquote { margin: 0; padding: 6px 10px; border-left: 3px solid var(--accent); background: var(--bg); border-radius: 0 8px 8px 0; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chip { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); }
+.chip.featured { background: var(--accent); color: #fff; border-color: var(--accent); }
+.chip.archive { background: var(--bg); }
+.star { margin-left: auto; padding: 2px 8px; font-size: 20px; line-height: 1; border: none; background: none; color: var(--ink-3); }
+.star.on { color: #B8860B; }
+.family h2 { display: flex; gap: 8px; align-items: baseline; }
+.flag-box { background: #FBEDEA; border: 1px solid #E5B4AB; border-radius: 10px; padding: 8px 10px; font-size: 14px; color: var(--bad); }
+.flag-box a { color: var(--bad); font-weight: 700; }
