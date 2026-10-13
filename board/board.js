@@ -20,7 +20,7 @@ async function start() {
   const view = new URLSearchParams(location.search).get("view");
   if (board?.owners?.includes(me.id) && board.kind === "constitution") {
     if (view === "ballot") { const { data: rv } = await sb.from("board_reviewers").select("user_id").eq("board_id", board.id).eq("user_id", me.id).maybeSingle(); return ballot(board, me, { preview: board.status === "draft" || !rv || new URLSearchParams(location.search).has("preview"), signedInAs: signedInAs(me) }); }
-    return board.status === "draft" ? ownerConstitution(board) : ownerLive(board);
+    return board.status === "draft" ? ownerConstitution(board, me) : ownerLive(board);
   }
   if (board?.owners?.includes(me.id)) return board.kind === "brand" ? (new URLSearchParams(location.search).get("view") === "shelves" ? ownerBrand(board) : ownerCull(board, { cropper, brand: true })) : board.status === "draft" ? ownerCull(board, { cropper }) : ownerLive(board);
   if (!board || INVITE) {

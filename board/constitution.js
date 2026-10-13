@@ -12,8 +12,19 @@
 import { sb, el, show, errBox, rpc, armed, when, shuffle } from "./core.js";
 import { createDock } from "./dock.js";
 import { cardTake, ballotNote } from "./coach.js";
+import { createVoice, command } from "./voice.js";
 
 const STATUS = { proposed: "Proposed", open: "Open question", agreed: "Agreed", adopted: "Adopted", parked: "Parked" };
+// An open decision is anything not yet decided (proposed or an open question); settled is agreed or adopted.
+const UNDECIDED = ["proposed", "open"], SETTLED = ["agreed", "adopted"];
+const n = (k, one, many = `${one}s`) => `${k === 0 ? "no" : k} ${k === 1 ? one : many}`;
+export function greeting({ name, cards, hour = new Date().getHours() }) {
+  const open = cards.filter(c => UNDECIDED.includes(c.card_status)).length, settled = cards.filter(c => SETTLED.includes(c.card_status)).length, parked = cards.filter(c => c.card_status === "parked").length;
+  const hi = `${hour < 12 ? "Morning" : hour < 18 ? "Afternoon" : "Evening"}${name ? ` ${name}` : ""}.`;
+  if (!open) return { text: `${hi} Every card here is settled${parked ? `, apart from ${n(parked, "parked one")}` : ""}. Nothing's waiting on you.`, open };
+  const rest = settled ? `The other ${settled} ${settled === 1 ? "is" : "are"} already settled.` : "None are settled yet.";
+  return { text: `${hi} You've got ${n(open, "open decision")} here. ${rest}${parked ? ` ${parked} ${parked === 1 ? "is" : "are"} parked.` : ""} Want to take the open ones one at a time?`, open };
+}
 const VOTES = [["adopt", "Adopt"], ["amend", "Amend"], ["reject", "Reject"], ["abstain", "Abstain"]];
 const DIRECTION = /^\s*(please\s+)?(add|edit|change|merge|move|re-?tag|tag|untag|set|mark|rename|rewrite|say|make (your|the)|don'?t take|do not take|archive|restore|put)\b/i;
 const short = (t, n = 0) => (n && t.length > n ? `${t.slice(0, n).replace(/\s+\S*$/, "")}…` : t);
@@ -28,8 +39,8 @@ const coachMark = () => {
 const recordText = (t) => String(t || "").split(/\n{2,}/).map(p => el("p", {}, p.replace(/\*\*(.+?)\*\*/g, "$1")));
 
 // ── Owner: the working copy ──
-export async function ownerConstitution(board) {
-  const S = { cards: [], events: [], part: "", status: "", tag: "", focus: null, open: new Set(), note: board.curator_note || "" };
+export async function ownerConstitution(board, me = {}) {
+  const S = { cards: [], events: [], part: "", status: "", tag: "", focus: null, open: new Set(), note: board.curator_note || "", walk: null, toldHow: false, quietTries: 0 };
   const load = async () => {
     [S.cards, { data: S.events }] = await Promise.all([rpc("board_candidates", { p_board: board.id }),
       sb.from("board_events").select("at, action, summary").eq("board_id", board.id).order("at", { ascending: false }).limit(40)]);
@@ -37,26 +48,76 @@ export async function ownerConstitution(board) {
   await load();
   const byId = (id) => S.cards.find(c => c.id === id);
   const active = () => S.cards.filter(c => !c.archived_at).sort((a, b) => a.sort_order - b.sort_order);
-  const shown = () => active().filter(c => (!S.part || c.family === S.part) && (!S.status || c.card_status === S.status) && (!S.tag || (c.tags || []).includes(S.tag)));
+  const shown = () => active().filter(c => (!S.part || c.family === S.part) && (!S.status || (S.status === "undecided" ? UNDECIDED.includes(c.card_status) : c.card_status === S.status)) && (!S.tag || (c.tags || []).includes(S.tag)));
   const refOf = (id) => byId(id)?.ref || "";
 
-  const dock = createDock({ mode: "owner", key: `${board.id}:cc`,
-    hello: "I'm here. Ask me about any card. To change a card or what I say, tell me in the Coach side panel; each change waits for your Approve.",
+  const dock = createDock({ mode: "owner", key: `${board.id}:cc`, hello: null,
     context: () => { const c = byId(S.focus); return c ? { name: c.ref, hasTake: Boolean(c.coach_take) } : {}; },
-    onAsk: (q) => (q && DIRECTION.test(q) ? redirect(q) : askTake(q)) });
-  function redirect(q) {
-    dock.asked(q);
-    dock.say("I make changes from the Coach side panel, so each one gets an Approve card and a line in ADOPTION-LOG.md. Say it there, by voice or text, the same words work.");
+    onAsk: (q) => heard(q, { typed: true }), onMic: () => { voice.stop(); converse(); } });
+  // Coach talks: every line is written in the panel and spoken aloud.
+  const voice = createVoice({ onState: (st) => dock.state(st), onNotice: (t) => dock.voiceNote(t), onClear: () => dock.voiceNote("") });
+  const talk = (text) => { dock.say(text); return voice.speak(text); };
+  // Listen for one reply and act on it; keeps the conversation going while Rick is walking the cards.
+  async function converse() {
+    const said = await voice.listen();
+    if (!said) { if (S.walk && ++S.quietTries < 2) return converse(); S.quietTries = 0; if (S.walk && !voice.lastProblem) dock.voiceNote("I didn't hear anything, so I've stopped listening. Tap the mic to carry on."); return; }
+    S.quietTries = 0;
+    return heard(said);
   }
-  async function askTake(question, c = byId(S.focus)) {
-    if (!c) { dock.asked(question || "Your take?"); dock.say("Tap a card first, then ask me about it."); return; }
-    dock.asked(question || `Your honest take on ${c.ref}?`);
+  async function heard(q, { typed = false } = {}) {
+    if (!q) return;
+    const cmd = command(q);
+    dock.asked(q);
+    if (DIRECTION.test(q) && !cmd) { await talk("I make changes from the Coach side panel, so each one gets an Approve card and a line in the adoption log. Say it there, the same words work."); return; }
+    if (cmd === "walk") return startWalk();
+    if (cmd === "stop") { S.walk = null; await talk("Okay, stopping here. Tap the mic when you want to pick it up."); return; }
+    if (cmd === "all") { S.walk = null; S.status = ""; S.part = ""; S.tag = ""; render(); await talk(`Showing all ${active().length} cards.`); return; }
+    if (cmd && !S.walk) { await talk("Say \u201cwalk me through the open ones\u201d and I'll take you card by card."); return typed ? null : converse(); }
+    if (cmd === "next") return step(1);
+    if (cmd === "back") return step(-1);
+    if (cmd === "repeat") return present();
+    await askTake(q, byId(S.focus), { asked: true });
+    if (S.walk && !typed) return converse();
+  }
+  // The walk: filter to open decisions and go card to card, reading Coach's take on each.
+  async function startWalk() {
+    const list = active().filter(c => UNDECIDED.includes(c.card_status));
+    if (!list.length) { await talk("There's nothing open. Every card is settled or parked."); return; }
+    S.status = "undecided"; S.part = ""; S.tag = ""; S.walk = { ids: list.map(c => c.id), i: 0 };
+    return present();
+  }
+  async function step(d) {
+    const w = S.walk; if (!w) return;
+    const i = w.i + d;
+    if (i < 0) { await talk("That's the first one."); return converse(); }
+    if (i >= w.ids.length) { S.walk = null; await talk(`That's all ${w.ids.length} open ${w.ids.length === 1 ? "decision" : "decisions"}. Tap the mic if you want to go round again.`); return; }
+    w.i = i; return present();
+  }
+  async function present() {
+    const w = S.walk, c = byId(w.ids[w.i]);
+    S.focus = c.id; dock.refreshAbout(); render();
+    document.getElementById(c.ref)?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    let take = c.coach_take;
+    if (!take) {
+      const stop = dock.thinking(`Reading ${c.ref}…`);
+      try { take = (await cardTake({ card: c, others: active().filter(x => x.id !== c.id) })).take; await rpc("board_coach_words", { p_concept: c.id, p_kind: "take", p_text: take, p_neutral: false }); c.coach_take = take; render(); }
+      catch (e) { take = null; dock.error(`I couldn't read it just now (${e.message || "no answer"}).`); }
+      finally { stop(); }
+    }
+    const how = S.toldHow ? "" : " Say next, back, or ask me anything about it.";
+    S.toldHow = true;
+    await talk(`${w.i + 1} of ${w.ids.length}. ${c.ref}, ${c.label.replace(/^(Pillar|Rail) (\d\d): /, "$1 $2, ")}.${take ? ` My take: ${take}` : ""}${how}`);
+    if (S.walk === w) return converse();
+  }
+  async function askTake(question, c = byId(S.focus), { asked = false } = {}) {
+    if (!c) { if (!asked) dock.asked(question || "Your take?"); await talk("Tap a card first, then ask me about it."); return; }
+    if (!asked) dock.asked(question || `Your honest take on ${c.ref}?`);
     const stop = dock.thinking(`Reading ${c.ref}…`);
     try {
       const r = await cardTake({ card: c, question, others: active().filter(x => x.id !== c.id) });
       stop();
-      dock.say(r.take);
       if (!question) { await rpc("board_coach_words", { p_concept: c.id, p_kind: "take", p_text: r.take, p_neutral: false }); await load(); render(); }
+      await talk(r.take);
     } catch (e) { stop(); dock.error(`Coach couldn't answer. ${e.message || ""}`.trim()); }
   }
 
@@ -122,7 +183,7 @@ export async function ownerConstitution(board) {
       el("p", { class: "cc-how" }, coachMark(), el("span", {}, "To add, edit, merge, re-tag, re-status or move a card, or to change what Coach says, tell Coach in the side panel by voice or text. Each change waits on an Approve card there and goes into ", el("b", {}, "constitution/ADOPTION-LOG.md"), ".")),
       el("div", { class: "cc-filters row" },
         el("label", {}, "Part", el("select", { onchange: (e) => { S.part = e.target.value; render(); } }, options(parts.map(p => [p, p]), S.part, "All parts"))),
-        el("label", {}, "Status", el("select", { onchange: (e) => { S.status = e.target.value; render(); } }, options(Object.entries(STATUS), S.status, "Any status"))),
+        el("label", {}, "Status", el("select", { onchange: (e) => { S.status = e.target.value; S.walk = null; render(); } }, options([["undecided", "Open decisions (proposed or open)"], ...Object.entries(STATUS)], S.status, "Any status"))),
         tags.length ? el("label", {}, "Tag", el("select", { onchange: (e) => { S.tag = e.target.value; render(); } }, options(tags.map(t => [t, t]), S.tag, "Any tag"))) : null,
         list.length !== active().length ? el("p", { class: "sub" }, `${list.length} of ${active().length} shown`) : null),
       el("div", { class: "cc-layout" }, contents,
@@ -134,6 +195,10 @@ export async function ownerConstitution(board) {
     if (S.focus) document.getElementById(byId(S.focus)?.ref || "")?.classList.add("focus");
   }
   render();
+  // Coach speaks first, every time the board opens: the real counts, then an offer.
+  const g = greeting({ name: String(me.user_metadata?.full_name || me.user_metadata?.name || "").split(" ")[0], cards: active() });
+  dock.open({ focus: false });
+  talk(g.text).then(() => (g.open ? converse() : null));
 }
 
 // ── The partner ballot (and Rick's preview of it) ──

@@ -18,7 +18,7 @@ const MIC = () => {
 
 const VERDICT_ROWS = [["trust", "Trust"], ["record", "A record"], ["human", "Human intent"], ["at24", "Works at 24px"]];
 
-export function createDock({ mode = "owner", key = "board", hello = "I'm here. Cull fast; ask me anything, or tap me for my honest take.", context = () => ({}), onAsk = null }) {
+export function createDock({ mode = "owner", key = "board", hello = "I'm here. Cull fast; ask me anything, or tap me for my honest take.", context = () => ({}), onAsk = null, onMic = null }) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const log = el("div", { class: "dock-log", "aria-live": "polite" });
   const about = el("span", { class: "dock-about" });
@@ -28,11 +28,12 @@ export function createDock({ mode = "owner", key = "board", hello = "I'm here. C
   const form = mode === "owner" ? el("form", { class: "dock-ask" }, input, micIn, send) : null;
   const closeBtn = el("button", { type: "button", class: "dock-close", "aria-label": "Close Coach" }, "Close");
   const action = el("div", { class: "dock-action", hidden: "" });     // a pending suggestion: pinned, never scrolled away
+  const voiceLine = el("p", { class: "dock-voice", role: "status", hidden: "" });   // why voice isn't working, in one line
   const panel = el("section", { class: "dock-panel", role: "dialog", "aria-label": "Coach", hidden: "" },
-    el("header", { class: "dock-head" }, el("b", {}, "Coach"), about, closeBtn), log, action, form);
+    el("header", { class: "dock-head" }, el("b", {}, "Coach"), about, closeBtn), voiceLine, log, action, form);
   const badge = el("span", { class: "dock-dot", hidden: "", "aria-label": "Coach has something for you" });
   const markBtn = el("button", { type: "button", class: "dock-mark", "aria-label": "Coach", "aria-expanded": "false" }, MARK(), badge);
-  const micBtn = SR && mode === "owner" ? el("button", { type: "button", class: "dock-mic", "aria-label": "Ask Coach out loud" }, MIC()) : null;
+  const micBtn = (SR || onMic) && mode === "owner" ? el("button", { type: "button", class: "dock-mic", "aria-label": "Talk to Coach" }, MIC()) : null;
   const firstVisit = (() => { try { return !localStorage.getItem(`coach-hello:${key}`); } catch { return true; } })();
   const helloLine = hello && firstVisit ? el("p", { class: "dock-hello" }, hello) : null;
   if (helloLine) setTimeout(() => helloLine.classList.add("fade"), window.matchMedia("(max-width: 640px)").matches ? 7000 : 15000);
@@ -44,11 +45,11 @@ export function createDock({ mode = "owner", key = "board", hello = "I'm here. C
   const isOpen = () => !panel.hidden;
   const setBadge = () => { badge.hidden = !pending || isOpen(); };
   const refreshAbout = () => { const c = context(); about.textContent = c?.name ? `On ${c.name}` : ""; input.placeholder = c?.name ? `Ask about ${c.name}…` : "Ask Coach…"; };
-  function open({ ask = false } = {}) {
+  function open({ ask = false, focus = true } = {}) {
     quietHello(); refreshAbout();
     panel.hidden = false; markBtn.setAttribute("aria-expanded", "true"); root.classList.add("open"); pending = 0; setBadge();
     if (ask && onAsk && context()?.name && !context()?.hasTake) onAsk(null);
-    else if (form) input.focus({ preventScroll: true });
+    else if (form && focus) input.focus({ preventScroll: true });
   }
   function close() { panel.hidden = true; markBtn.setAttribute("aria-expanded", "false"); root.classList.remove("open"); setBadge(); markBtn.focus({ preventScroll: true, focusVisible: false }); }
   markBtn.onclick = () => (isOpen() ? close() : open({ ask: mode === "owner" }));
@@ -65,12 +66,16 @@ export function createDock({ mode = "owner", key = "board", hello = "I'm here. C
     r.onend = () => root.classList.remove("listening");
     try { r.start(); } catch { r.onend(); }
   };
-  if (micBtn) micBtn.onclick = () => { open(); listen(); };
-  if (micIn) micIn.onclick = listen;
+  if (micBtn) micBtn.onclick = () => { open(); onMic ? onMic() : listen(); };
+  if (micIn) micIn.onclick = () => (onMic ? onMic() : listen());
 
   const entry = (...kids) => { const n = el("div", { class: "dock-entry" }, ...kids); log.append(n); log.scrollTop = log.scrollHeight; return n; };
   return {
     root, open, close, isOpen, refreshAbout, quiet: quietHello,
+    // Voice state: the Coach mark pulses while Coach speaks; the mic lights while listening.
+    state(st) { root.classList.toggle("speaking", st === "speaking"); root.classList.toggle("listening", st === "listening"); markBtn.setAttribute("aria-label", st === "speaking" ? "Coach is speaking" : st === "listening" ? "Coach is listening" : "Coach"); },
+    // Why voice isn't working, in one line, pinned at the top of the panel (and as a badge if closed).
+    voiceNote(text) { voiceLine.textContent = text; voiceLine.hidden = !text; if (text && !isOpen()) { pending++; setBadge(); } },
     // You asked: shown small, above the answer.
     asked(text) { entry(el("p", { class: "dock-q" }, text)); },
     thinking(text) { const n = entry(el("p", { class: "dock-wait" }, text)); return () => n.remove(); },
