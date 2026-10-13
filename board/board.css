@@ -60,3 +60,29 @@ th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line
 .link-box { display: grid; gap: 6px; background: var(--bg); border-radius: 10px; padding: 10px; }
 .link-box code { overflow-wrap: anywhere; font-size: 12px; }
 @media (prefers-reduced-motion: no-preference) { .concept { animation: in .25s ease-out; } @keyframes in { from { opacity: 0; transform: translateY(6px); } } }
+/* Owner: draft mode */
+.grid { display: grid; gap: 12px; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.cand.edit { cursor: default; gap: 8px; }
+.cand.edit textarea { min-height: 54px; font-size: 14px; }
+.cand.edit input[type=text] { font-size: 14px; padding: 8px 10px; }
+.cand.archived { cursor: default; opacity: .85; }
+.cand .tools button, .cand .tools .button { padding: 6px 10px; font-size: 13px; }
+.pick { display: flex; gap: 6px; align-items: center; font-size: 13px; font-weight: 800; }
+.pick input { width: 18px; height: 18px; }
+label.button { display: inline-flex; font-weight: 700; border-radius: 10px; border: 1px solid var(--line); background: var(--card); padding: 10px 16px; cursor: pointer; font-size: 16px; }
+label.button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+label.button:focus-within { outline: 3px solid #7FA7D9; outline-offset: 2px; }
+.file { position: absolute; width: 1px; height: 1px; opacity: 0; }
+button.link { background: none; border: none; padding: 0; text-decoration: underline; font-weight: 600; justify-self: start; }
+.rounds { display: flex; gap: 10px; flex-wrap: wrap; font-size: 14px; }
+.rounds a { color: var(--ink-2); }
+.rounds a[aria-current="page"] { color: var(--ink); font-weight: 800; }
+.preview-bar { background: #FFF6D6; border: 1px solid #E8D58A; border-radius: 10px; padding: 8px 10px; justify-content: space-between; }
+canvas.crop { width: 100%; height: auto; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+.crop-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.crop-grid input { width: 100%; }
+.new-board { border-top: 1px solid var(--line); padding-top: 12px; }
+.sheet.wide { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+label.button { position: relative; }

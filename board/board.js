@@ -52,14 +52,14 @@ async function start() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) return signInScreen();
   const me = session.user;
-  let { data: board } = await sb.from("boards").select("id, slug, title, brief, status, owners, approved_at").eq("slug", SLUG).maybeSingle();
-  if (board?.owners?.includes(me.id)) return board.status === "draft" ? ownerApprove(board) : ownerLive(board);
+  let { data: board } = await sb.from("boards").select(BOARD_COLS).eq("slug", SLUG).maybeSingle();
+  if (board?.owners?.includes(me.id)) return board.status === "draft" ? ownerDraft(board) : ownerLive(board);
   if (!board || INVITE) {
     if (!INVITE) return show(el("div", { class: "card" }, el("h1", {}, "This board needs your invite link"), el("p", { class: "muted" }, "Open the link you were sent. Each reviewer has their own."), signedInAs(me)));
     const { error } = await sb.rpc("board_claim", { p_slug: SLUG, p_token: INVITE });
     if (error) return show(el("div", { class: "card" }, el("h1", {}, "Can't open the board"), errBox(error), signedInAs(me)));
     sessionStorage.removeItem(`invite:${SLUG}`);
-    ({ data: board } = await sb.from("boards").select("id, slug, title, brief, status, owners, approved_at").eq("slug", SLUG).maybeSingle());
+    ({ data: board } = await sb.from("boards").select(BOARD_COLS).eq("slug", SLUG).maybeSingle());
   }
   return reviewer(board, me);
 }
@@ -95,37 +95,19 @@ async function reviewer(board, me) {
     el("p", { class: "small" }, `${order.length} concepts, one at a time, in your own order. You'll see the team's reactions after you submit yours.`), signedInAs(me)));
   const step = async (i, cheer = "") => {
     if (i >= order.length) return review();
-    const c = order[i], prev = answers[c.id] || {};
-    let score = prev.score || 0;
+    const c = order[i];
     const src = await imageUrl(c.image_path).catch(() => "");
-    const scoreBtns = [1, 2, 3, 4, 5].map(n => { const b = el("button", { type: "button", "aria-pressed": String(n === score), "aria-label": `Score ${n} of 5` }, String(n)); b.onclick = () => { score = n; scoreBtns.forEach(x => x.setAttribute("aria-pressed", String(x === b))); check(); }; return b; });
-    const word = el("input", { type: "text", maxlength: "32", autocomplete: "off", placeholder: "e.g. solid", value: prev.word || "", "aria-label": "One word it makes you feel" });
-    const comment = el("textarea", { maxlength: "500", placeholder: "Optional: anything else?", "aria-label": "Optional comment" }); comment.value = prev.comment || "";
-    const next = el("button", { type: "button", class: "primary" }, i === order.length - 1 ? "Done: review my answers" : "Next");
-    const msg = el("p", { class: "err" });
-    const check = () => { next.disabled = !(score && /^\S{1,32}$/.test(word.value.trim())); };
-    word.oninput = check; check();
-    next.onclick = async () => {
-      next.disabled = true; msg.textContent = "";
-      const row = { board_id: board.id, user_id: me.id, concept_id: c.id, score, word: word.value.trim(), comment: comment.value.trim() || null, updated_at: new Date().toISOString() };
-      const { error } = await sb.from("board_responses").upsert(row, { onConflict: "board_id,user_id,concept_id" });
-      if (error) { msg.textContent = error.message; next.disabled = false; return; }
-      answers[c.id] = row;
-      const line = ENCOURAGE[i % ENCOURAGE.length];
-      if (voiceOn && i < order.length - 1) speak(line);
-      step(i + 1, i < order.length - 1 ? line : "");
-    };
-    const back = i > 0 ? el("button", { type: "button", onclick: () => step(i - 1) }, "Back") : null;
-    show(el("div", { class: "card concept" },
-      el("div", { class: "row" }, el("span", { class: "progress" }, `${i + 1} of ${order.length}`), el("span", { class: "encourage" }, cheer)),
-      el("div", { class: "letter" }, `Concept ${c.letter}`),
-      el("img", { class: "big", src, alt: `Concept ${c.letter}` }),
-      el("div", { class: "tiny-row" }, ...[64, 40, 24].map(px => el("div", { class: "tiny" }, el("img", { src, alt: "", width: px, height: px }), `${px}px`)), el("div", { class: "tiny dark" }, el("img", { src, alt: "", width: 40, height: 40 }), "on dark")),
-      el("p", { class: "small" }, "It has to work tiny too: that's the app-icon size."),
-      el("div", {}, el("div", { class: "scores" }, scoreBtns), el("div", { class: "scale" }, el("span", {}, "1 · not for me"), el("span", {}, "5 · love it"))),
-      el("label", {}, "One word it makes you feel", word),
-      el("label", {}, "Comment (optional)", comment, dictateButton(comment)),
-      msg, el("div", { class: "row" }, back, next)));
+    show(conceptView({ letter: c.letter, src, i, total: order.length, cheer, prev: answers[c.id] || {},
+      onBack: i > 0 ? () => step(i - 1) : null,
+      onNext: async ({ score, word, comment }) => {
+        const row = { board_id: board.id, user_id: me.id, concept_id: c.id, score, word, comment, updated_at: new Date().toISOString() };
+        const { error } = await sb.from("board_responses").upsert(row, { onConflict: "board_id,user_id,concept_id" });
+        if (error) return error.message;
+        answers[c.id] = row;
+        const line = ENCOURAGE[i % ENCOURAGE.length];
+        if (voiceOn && i < order.length - 1) speak(line);
+        step(i + 1, i < order.length - 1 ? line : "");
+      } }));
   };
   const review = () => {
     const rows = order.map(c => el("tr", {}, el("td", {}, c.letter), el("td", {}, String(answers[c.id]?.score ?? "—")), el("td", {}, answers[c.id]?.word || "—")));
@@ -144,6 +126,33 @@ async function reviewer(board, me) {
       el("div", { class: "row" }, el("button", { type: "button", onclick: () => step(0) }, "Change something"), go)));
   };
   intro();
+}
+// One concept, as a reviewer sees it (also used by the owner's "Preview as reviewer").
+function conceptView({ letter, src, i, total, cheer = "", prev = {}, onNext, onBack, banner = null }) {
+  let score = prev.score || 0;
+  const scoreBtns = [1, 2, 3, 4, 5].map(n => { const b = el("button", { type: "button", "aria-pressed": String(n === score), "aria-label": `Score ${n} of 5` }, String(n)); b.onclick = () => { score = n; scoreBtns.forEach(x => x.setAttribute("aria-pressed", String(x === b))); check(); }; return b; });
+  const word = el("input", { type: "text", maxlength: "32", autocomplete: "off", placeholder: "e.g. solid", value: prev.word || "", "aria-label": "One word it makes you feel" });
+  const comment = el("textarea", { maxlength: "500", placeholder: "Optional: anything else?", "aria-label": "Optional comment" }); comment.value = prev.comment || "";
+  const next = el("button", { type: "button", class: "primary" }, i === total - 1 ? "Done: review my answers" : "Next");
+  const msg = el("p", { class: "err" });
+  const check = () => { next.disabled = !(score && /^\S{1,32}$/.test(word.value.trim())); };
+  word.oninput = check; check();
+  next.onclick = async () => {
+    next.disabled = true; msg.textContent = "";
+    const err = await onNext({ score, word: word.value.trim(), comment: comment.value.trim() || null });
+    if (err) { msg.textContent = err; next.disabled = false; }
+  };
+  const back = onBack ? el("button", { type: "button", onclick: onBack }, "Back") : null;
+  return el("div", { class: "card concept" }, banner,
+    el("div", { class: "row" }, el("span", { class: "progress" }, `${i + 1} of ${total}`), el("span", { class: "encourage" }, cheer)),
+    el("div", { class: "letter" }, `Concept ${letter}`),
+    el("img", { class: "big", src, alt: `Concept ${letter}` }),
+    el("div", { class: "tiny-row" }, ...[64, 40, 24].map(px => el("div", { class: "tiny" }, el("img", { src, alt: "", width: px, height: px }), `${px}px`)), el("div", { class: "tiny dark" }, el("img", { src, alt: "", width: 40, height: 40 }), "on dark")),
+    el("p", { class: "small" }, "It has to work tiny too: that's the app-icon size."),
+    el("div", {}, el("div", { class: "scores" }, scoreBtns), el("div", { class: "scale" }, el("span", {}, "1 · not for me"), el("span", {}, "5 · love it"))),
+    el("label", {}, "One word it makes you feel", word),
+    el("label", {}, "Comment (optional)", comment, dictateButton(comment)),
+    msg, el("div", { class: "row" }, back, next));
 }
 // Speak a comment instead of typing it (Chrome); only the words are kept, never audio.
 function dictateButton(target) {
@@ -196,31 +205,203 @@ async function resultsList(board, { owner }) {
   return list;
 }
 
-// ── Owner: approve the featured set (nothing is shared before this) ──
-async function ownerApprove(board) {
-  const { data: cands, error } = await sb.rpc("board_candidates", { p_board: board.id });
-  if (error) return show(el("div", { class: "card" }, errBox(error)));
-  const picked = new Set();
-  const count = el("b", {}, "0 selected");
-  const go = el("button", { type: "button", class: "primary", disabled: "" }, "Approve and go live");
-  const msg = el("p", { class: "err" });
-  const update = () => { count.textContent = `${picked.size} selected`; go.disabled = picked.size < 7 || picked.size > 10; go.textContent = picked.size >= 7 && picked.size <= 10 ? `Approve these ${picked.size} and go live` : "Pick 7 to 10"; };
-  const sheet = el("div", { class: "sheet" }, cands.map(c => {
-    const img = el("img", { alt: `Candidate ${c.candidate_no}` }); imageUrl(c.image_path).then(u => { img.src = u; }).catch(() => {});
-    const card = el("div", { class: "cand", role: "checkbox", "aria-checked": "false", tabindex: "0" }, img, el("div", { class: "no" }, `#${c.candidate_no}`), el("div", { class: "src" }, c.source));
-    const toggle = () => { picked.has(c.candidate_no) ? picked.delete(c.candidate_no) : picked.add(c.candidate_no); card.classList.toggle("on", picked.has(c.candidate_no)); card.setAttribute("aria-checked", String(picked.has(c.candidate_no))); update(); };
-    card.onclick = toggle; card.onkeydown = (e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggle(); } };
-    return card;
-  }));
-  go.onclick = async () => {
-    go.disabled = true; msg.textContent = "";
-    const { data, error } = await sb.rpc("board_approve", { p_board: board.id, p_candidates: [...picked].sort((a, b) => a - b) });
-    if (error) { msg.textContent = error.message; update(); return; }
-    location.reload();
+// ── Owner: draft mode. Nothing is shared while a board is a draft. ──
+const BOARD_COLS = "id, slug, title, brief, status, owners, approved_at, series, round, parent_board";
+const IMAGE_TYPES = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
+async function uploadImage(board, blob) {
+  const ext = IMAGE_TYPES[blob.type];
+  if (!ext) throw new Error("Use a PNG, JPEG or WebP image.");
+  if (blob.size > 10 * 1024 * 1024) throw new Error("That image is over 10 MB.");
+  const path = `${board.id}/${Date.now().toString(36)}-${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}.${ext}`;
+  const { error } = await sb.storage.from("board-concepts").upload(path, blob, { contentType: blob.type, upsert: false });
+  if (error) throw error;
+  return path;
+}
+const rpc = async (fn, args) => { const { data, error } = await sb.rpc(fn, args); if (error) throw error; return data; };
+const shuffle = (xs) => { const a = [...xs]; for (let i = a.length - 1; i > 0; i--) { const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const when = (t) => new Date(t).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+
+// Two clicks for anything that locks or closes: the first arms, the second does it.
+function armed(label, armedLabel, run, cls = "") {
+  const b = el("button", { type: "button", class: cls }, label);
+  let t = null;
+  b.onclick = async () => {
+    if (!t) { b.textContent = armedLabel; t = setTimeout(() => { t = null; b.textContent = label; }, 5000); return; }
+    clearTimeout(t); t = null; b.disabled = true;
+    try { await run(); } catch (e) { b.disabled = false; b.textContent = label; b.after(errBox(e)); }
   };
-  update();
-  show(el("div", { class: "card" }, el("h1", {}, "Contact sheet: pick 7–10"), el("p", { class: "muted" }, `${cands.length} candidates. Only you can see this page. Nothing is shared until you approve a set; then each gets a random letter (A, B, C…), and reviewers never see these numbers or notes.`)),
-    sheet, el("div", { class: "sticky row" }, count, go, msg));
+  return b;
+}
+
+async function roundsList(board) {
+  const { data } = await sb.from("boards").select("slug, round, status, approved_at, created_at").eq("series", board.series).order("round");
+  if (!data || data.length < 2) return null;
+  return el("div", { class: "rounds" }, data.map(r => el("a", { href: `?b=${r.slug}`, "aria-current": r.slug === board.slug ? "page" : null },
+    `Round ${r.round} · ${r.status === "closed" ? "closed, kept as the record" : r.status}`)));
+}
+
+async function ownerDraft(board, ui = { tab: "concepts", picked: new Set() }) {
+  const cands = await rpc("board_candidates", { p_board: board.id });
+  const active = cands.filter(c => !c.archived_at), archived = cands.filter(c => c.archived_at);
+  for (const id of [...ui.picked]) if (!active.some(c => c.id === id)) ui.picked.delete(id);
+  const again = (tab = ui.tab) => ownerDraft(board, { ...ui, tab }).catch(e => show(el("div", { class: "card" }, errBox(e))));
+  const msg = el("p", { class: "err" });
+  const act = async (run) => { msg.textContent = ""; try { await run(); await again(); } catch (e) { msg.textContent = e.message || String(e); } };
+
+  // Concepts: upload, replace, crop, reorder, label, notes, archive
+  const upload = el("input", { type: "file", accept: "image/png,image/jpeg,image/webp", multiple: "", class: "file" });
+  upload.onchange = () => act(async () => {
+    for (const f of upload.files) { const path = await uploadImage(board, f); await rpc("board_add_concept", { p_board: board.id, p_image_path: path, p_label: f.name.replace(/\.[^.]+$/, "").slice(0, 80) }); }
+  });
+  const move = (c, to) => act(async () => {
+    const ids = active.map(x => x.id).filter(id => id !== c.id);
+    ids.splice(Math.max(0, Math.min(ids.length, to)), 0, c.id);
+    await rpc("board_reorder", { p_board: board.id, p_concepts: ids });
+  });
+  const card = (c, i) => {
+    const img = el("img", { alt: c.label }); imageUrl(c.image_path).then(u => { img.src = u; }).catch(() => {});
+    const label = el("input", { type: "text", maxlength: "80", value: c.label, "aria-label": `Private label for #${c.candidate_no}` });
+    const notes = el("textarea", { maxlength: "1000", placeholder: "Notes (only you see these)", "aria-label": `Notes for #${c.candidate_no}` }); notes.value = c.notes || "";
+    const saved = el("span", { class: "small" });
+    const save = async () => { try { await rpc("board_label", { p_concept: c.id, p_label: label.value, p_notes: notes.value }); saved.textContent = "Saved ✓"; } catch (e) { saved.textContent = e.message; } };
+    label.onchange = save; notes.onchange = save;
+    const pick = el("input", { type: "checkbox", "aria-label": `Include #${c.candidate_no} when going live` }); pick.checked = ui.picked.has(c.id);
+    pick.onchange = () => { pick.checked ? ui.picked.add(c.id) : ui.picked.delete(c.id); card.classList.toggle("on", pick.checked); updateLive(); };
+    const replace = el("input", { type: "file", accept: "image/png,image/jpeg,image/webp", class: "file" });
+    replace.onchange = () => act(async () => { const path = await uploadImage(board, replace.files[0]); await rpc("board_replace_image", { p_concept: c.id, p_image_path: path }); });
+    const card = el("div", { class: `cand edit${ui.picked.has(c.id) ? " on" : ""}` }, img,
+      el("div", { class: "row" }, el("label", { class: "pick" }, pick, `#${c.candidate_no}`), el("span", { class: "small" }, `${i + 1} of ${active.length}`)),
+      label, notes, saved,
+      el("div", { class: "row tools" },
+        el("button", { type: "button", disabled: i === 0 ? "" : null, onclick: () => move(c, 0), title: "Move to the top" }, "Top"),
+        el("button", { type: "button", disabled: i === 0 ? "" : null, onclick: () => move(c, i - 1), "aria-label": "Move up" }, "↑"),
+        el("button", { type: "button", disabled: i === active.length - 1 ? "" : null, onclick: () => move(c, i + 1), "aria-label": "Move down" }, "↓")),
+      el("div", { class: "row tools" },
+        el("label", { class: "button" }, "Replace", replace),
+        el("button", { type: "button", onclick: () => cropper(board, c, again) }, "Crop"),
+        c.original_path && c.original_path !== c.image_path ? el("button", { type: "button", onclick: () => act(() => rpc("board_replace_image", { p_concept: c.id, p_image_path: c.original_path })) }, "Use original") : null,
+        el("button", { type: "button", onclick: () => act(() => rpc("board_archive", { p_concept: c.id, p_archive: true })) }, "Archive")),
+      el("p", { class: "small src" }, c.source));
+    return card;
+  };
+  const conceptsTab = el("div", { class: "grid" },
+    el("div", { class: "row" }, el("label", { class: "button primary" }, "＋ Upload images", upload), el("span", { class: "small" }, "PNG, JPEG or WebP. Replacing or cropping keeps the original.")),
+    active.length ? el("div", { class: "sheet wide" }, active.map(card)) : el("p", { class: "muted" }, "No concepts yet. Upload some."));
+
+  // Archive: everything removed, with dates; nothing is ever deleted
+  const archiveTab = el("div", { class: "grid" }, archived.length ? el("div", { class: "sheet" }, archived.map(c => {
+    const img = el("img", { alt: c.label }); imageUrl(c.image_path).then(u => { img.src = u; }).catch(() => {});
+    return el("div", { class: "cand archived" }, img, el("b", {}, `#${c.candidate_no} · ${c.label}`), el("span", { class: "small" }, `Archived ${when(c.archived_at)}`),
+      c.notes ? el("p", { class: "small" }, c.notes) : null,
+      el("button", { type: "button", onclick: () => act(() => rpc("board_archive", { p_concept: c.id, p_archive: false })) }, "Restore"));
+  })) : el("p", { class: "muted" }, "Nothing archived. Archived concepts land here with the date, and can be restored."));
+
+  // Preview: exactly what a reviewer sees, blind-lettered, in a random order; nothing is saved
+  const previewSet = () => (ui.picked.size ? active.filter(c => ui.picked.has(c.id)) : active);
+  const preview = el("button", { type: "button" }, "Preview as reviewer");
+  preview.onclick = () => previewBoard(board, previewSet(), again);
+
+  // Go live
+  const count = el("b", {});
+  const live = el("div", { class: "row" });
+  const updateLive = () => {
+    const n = ui.picked.size;
+    count.textContent = `${n} selected`;
+    preview.textContent = n ? `Preview these ${n} as a reviewer` : "Preview as reviewer";
+    const ok = n >= 7 && n <= 10;
+    live.replaceChildren(ok ? armed(`Go live with these ${n}`, "Locks the set. Tap again to go live", async () => {
+      const nos = active.filter(c => ui.picked.has(c.id)).map(c => c.candidate_no);
+      await rpc("board_approve", { p_board: board.id, p_candidates: nos });
+      location.reload();
+    }, "primary") : el("span", { class: "small" }, "Tick 7 to 10 to go live"));
+  };
+  updateLive();
+
+  const tabs = [["concepts", `Concepts (${active.length})`, conceptsTab], ["archive", `Archive (${archived.length})`, archiveTab]];
+  const tabBar = el("div", { class: "tabs", role: "tablist" }, tabs.map(([k, name]) => el("button", { type: "button", role: "tab", "aria-selected": String(ui.tab === k), onclick: () => again(k) }, name)));
+  show(el("div", { class: "card" }, el("h1", {}, board.title), el("p", { class: "muted" }, `Round ${board.round} · draft. Only you can see this page. Nothing is shared until you go live; then each concept gets a random letter, and reviewers never see your labels, notes or numbers.`),
+      await roundsList(board), newBoardButton()),
+    tabBar, (tabs.find(t => t[0] === ui.tab) || tabs[0])[2], msg,
+    el("div", { class: "sticky row" }, count, preview, live));
+}
+
+// Crop with four sliders; saves a new image (the original is kept)
+async function cropper(board, c, done) {
+  const blob = await (await fetch(await imageUrl(c.image_path))).blob();
+  const bmp = await createImageBitmap(blob);
+  const cut = { left: 0, right: 0, top: 0, bottom: 0 };
+  const canvas = el("canvas", { class: "crop", width: String(bmp.width), height: String(bmp.height), "aria-label": "Crop preview" });
+  const draw = () => {
+    const g = canvas.getContext("2d"); g.clearRect(0, 0, bmp.width, bmp.height); g.drawImage(bmp, 0, 0);
+    const x = bmp.width * cut.left / 100, y = bmp.height * cut.top / 100, w = bmp.width * (1 - (cut.left + cut.right) / 100), h = bmp.height * (1 - (cut.top + cut.bottom) / 100);
+    g.fillStyle = "rgba(30,34,38,.55)"; g.fillRect(0, 0, bmp.width, y); g.fillRect(0, y + h, bmp.width, bmp.height - y - h); g.fillRect(0, y, x, h); g.fillRect(x + w, y, bmp.width - x - w, h);
+    return { x, y, w, h };
+  };
+  const sliders = ["left", "right", "top", "bottom"].map(k => {
+    const r = el("input", { type: "range", min: "0", max: "45", value: "0", "aria-label": `Trim ${k}` });
+    r.oninput = () => { cut[k] = Number(r.value); draw(); };
+    return el("label", {}, `Trim ${k}`, r);
+  });
+  const msg = el("p", { class: "err" });
+  const save = el("button", { type: "button", class: "primary" }, "Save crop");
+  save.onclick = async () => {
+    save.disabled = true;
+    try {
+      const { x, y, w, h } = draw();
+      const out = el("canvas", { width: String(Math.round(w)), height: String(Math.round(h)) });
+      out.getContext("2d").drawImage(bmp, x, y, w, h, 0, 0, Math.round(w), Math.round(h));
+      const png = await new Promise(r => out.toBlob(r, "image/png"));
+      const path = await uploadImage(board, png);
+      await rpc("board_replace_image", { p_concept: c.id, p_image_path: path });
+      await done("concepts");
+    } catch (e) { msg.textContent = e.message || String(e); save.disabled = false; }
+  };
+  draw();
+  show(el("div", { class: "card" }, el("h1", {}, `Crop: ${c.label}`), canvas, el("div", { class: "crop-grid" }, sliders), msg,
+    el("div", { class: "row" }, el("button", { type: "button", onclick: () => done("concepts") }, "Cancel"), save)));
+}
+
+// The reviewer's screens, run locally: letters and order are drawn fresh each time, nothing is saved
+async function previewBoard(board, set, back) {
+  const order = shuffle(set).map((c, i) => ({ ...c, letter: String.fromCharCode(65 + i) }));
+  const shuffled = shuffle(order);
+  const answers = {};
+  const banner = () => el("div", { class: "preview-bar row" }, el("b", {}, "Preview: what a reviewer sees. Nothing is saved."), el("button", { type: "button", onclick: () => back() }, "Exit preview"));
+  const intro = () => show(el("div", { class: "card" }, banner(), el("h1", {}, board.title), el("p", { class: "brief" }, board.brief),
+    el("div", { class: "row" }, playButton(board.brief), el("button", { type: "button", class: "primary", onclick: () => step(0) }, "Start")),
+    el("p", { class: "small" }, `${shuffled.length} concepts, one at a time, in your own order. You'll see the team's reactions after you submit yours.`)));
+  const step = async (i, cheer = "") => {
+    if (i >= shuffled.length) return show(el("div", { class: "card" }, banner(), el("h1", {}, "Your answers"),
+      el("table", {}, el("tr", {}, el("th", {}, "Concept"), el("th", {}, "Score"), el("th", {}, "Word")), shuffled.map(c => el("tr", {}, el("td", {}, c.letter), el("td", {}, String(answers[c.id]?.score ?? "—")), el("td", {}, answers[c.id]?.word || "—")))),
+      el("p", { class: "muted" }, "Here a reviewer submits. In preview, nothing is sent."), el("div", { class: "row" }, el("button", { type: "button", onclick: () => previewBoard(board, set, back) }, "Preview again (new order)"), el("button", { type: "button", class: "primary", onclick: () => back() }, "Back to the draft"))));
+    const c = shuffled[i];
+    const src = await imageUrl(c.image_path).catch(() => "");
+    show(conceptView({ letter: c.letter, src, i, total: shuffled.length, cheer, prev: answers[c.id] || {}, banner: banner(),
+      onBack: i > 0 ? () => step(i - 1) : null,
+      onNext: async (v) => { answers[c.id] = v; step(i + 1, i < shuffled.length - 1 ? ENCOURAGE[i % ENCOURAGE.length] : ""); } }));
+  };
+  intro();
+}
+
+// A new board (e.g. the brand board); you own it, it starts as a draft
+function newBoardButton() {
+  const b = el("button", { type: "button", class: "link" }, "＋ New board");
+  b.onclick = () => {
+    const title = el("input", { type: "text", maxlength: "120", placeholder: "e.g. Squire brand board" });
+    const slug = el("input", { type: "text", maxlength: "40", placeholder: "e.g. squire-brand" });
+    const brief = el("textarea", { maxlength: "2000", placeholder: "What reviewers read first" });
+    title.oninput = () => { if (!slug.dataset.touched) slug.value = title.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40); };
+    slug.oninput = () => { slug.dataset.touched = "1"; };
+    const msg = el("p", { class: "err" });
+    const make = el("button", { type: "button", class: "primary" }, "Make the board");
+    make.onclick = async () => {
+      make.disabled = true; msg.textContent = "";
+      try { await rpc("board_create", { p_slug: slug.value.trim(), p_title: title.value.trim(), p_brief: brief.value.trim() }); location.href = `?b=${slug.value.trim()}`; }
+      catch (e) { msg.textContent = /slug|unique|check/i.test(e.message) ? "That web name is taken or not allowed (3–40 lowercase letters, numbers, dashes)." : e.message; make.disabled = false; }
+    };
+    b.replaceWith(el("div", { class: "grid new-board" }, el("label", {}, "Title", title), el("label", {}, "Web name", slug), el("label", {}, "Brief", brief), msg, el("div", { class: "row" }, el("button", { type: "button", onclick: () => location.reload() }, "Cancel"), make)));
+  };
+  return b;
 }
 
 // ── Owner: reviewers, links and results ──
@@ -266,8 +447,18 @@ async function ownerLive(board) {
     catch (e) { summaryOut.replaceChildren(errBox(e)); }
     summarize.disabled = false;
   };
-  show(el("div", { class: "card" }, el("h1", {}, board.title), el("p", { class: "muted" }, `Live since ${new Date(board.approved_at || Date.now()).toLocaleDateString()}. ${finished} of ${invited} reviewers finished.`), el("div", { class: "row" }, summarize), summaryOut),
-    el("div", { class: "card" }, el("h2", {}, "Reviewers"), people, el("label", {}, "Add a reviewer", label), email, add, out),
+  const closed = board.status === "closed";
+  const opened = (invites || []).some(i => i.claimed_by);
+  const { data: newer } = await sb.from("boards").select("slug, round").eq("parent_board", board.id).maybeSingle();
+  const changes = el("div", { class: "grid" });
+  if (newer) changes.append(el("p", { class: "muted" }, "This round is closed and kept as the record. ", el("a", { href: `?b=${newer.slug}` }, `Go to round ${newer.round}`)));
+  else if (!opened && !closed) changes.append(el("div", { class: "row" }, armed("Back to draft", "Nobody has opened a link yet. Tap again to unlock", async () => { await rpc("board_unlock", { p_board: board.id }); location.reload(); }),
+    el("span", { class: "small" }, "Works only until a reviewer opens their link.")));
+  else changes.append(el("div", { class: "row" }, armed(`Start round ${board.round + 1}`, `Closes round ${board.round} (answers kept). Tap again`, async () => { const slug = await rpc("board_new_round", { p_board: board.id }); location.href = `?b=${slug}`; }),
+    el("span", { class: "small" }, opened ? "The set is locked: a reviewer has opened a link. To change it, start a new round; this round's answers stay as the record." : "")));
+  show(el("div", { class: "card" }, el("h1", {}, board.title), el("p", { class: "muted" }, closed ? `Round ${board.round} · closed. ${finished} of ${invited} reviewers finished.` : `Round ${board.round} · live since ${new Date(board.approved_at || Date.now()).toLocaleDateString()}. ${finished} of ${invited} reviewers finished.`),
+      el("div", { class: "row" }, summarize), summaryOut, changes, await roundsList(board)),
+    closed ? null : el("div", { class: "card" }, el("h2", {}, "Reviewers"), people, el("label", {}, "Add a reviewer", label), email, add, out),
     el("div", { class: "card" }, el("h2", {}, "Results (submitted answers only)"), results));
 }
 // Coach's short summary, through Coach's own server (the Claude key stays there).
